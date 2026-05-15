@@ -273,7 +273,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--prewarm", type=int, default=0, help="Number of leading cases to run before measured timing")
     parser.add_argument("--request-timeout", type=float, default=120.0, help="Per-request timeout in seconds")
-    parser.add_argument("--language", default="")
+    parser.add_argument("--language", default="", nargs="?", const="")
     parser.add_argument("--output", default="testbench/results/latest.json")
     parser.add_argument("--summary-md", default="benchmarks/transcription/BENCHMARKS.md")
     parser.add_argument("--details-md", default="benchmarks/transcription/DETAILS.md")

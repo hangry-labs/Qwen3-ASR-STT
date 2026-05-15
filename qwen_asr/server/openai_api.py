@@ -2,20 +2,298 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Iterable
 
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_language_name, validate_language
 from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
 
 if TYPE_CHECKING:
     from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
+
+
+MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
+RESPONSE_FORMATS = {"json", "text", "verbose_json", "srt", "vtt"}
+TIMESTAMP_GRANULARITIES = {"segment", "word"}
+LANGUAGE_ALIASES = {
+    "zh": "Chinese",
+    "chinese": "Chinese",
+    "en": "English",
+    "english": "English",
+    "yue": "Cantonese",
+    "cantonese": "Cantonese",
+    "ar": "Arabic",
+    "arabic": "Arabic",
+    "de": "German",
+    "german": "German",
+    "fr": "French",
+    "french": "French",
+    "es": "Spanish",
+    "spanish": "Spanish",
+    "pt": "Portuguese",
+    "portuguese": "Portuguese",
+    "id": "Indonesian",
+    "indonesian": "Indonesian",
+    "it": "Italian",
+    "italian": "Italian",
+    "ko": "Korean",
+    "korean": "Korean",
+    "ru": "Russian",
+    "russian": "Russian",
+    "th": "Thai",
+    "thai": "Thai",
+    "vi": "Vietnamese",
+    "vietnamese": "Vietnamese",
+    "ja": "Japanese",
+    "japanese": "Japanese",
+    "tr": "Turkish",
+    "turkish": "Turkish",
+    "hi": "Hindi",
+    "hindi": "Hindi",
+    "ms": "Malay",
+    "malay": "Malay",
+    "nl": "Dutch",
+    "dutch": "Dutch",
+    "sv": "Swedish",
+    "swedish": "Swedish",
+    "da": "Danish",
+    "danish": "Danish",
+    "fi": "Finnish",
+    "finnish": "Finnish",
+    "pl": "Polish",
+    "polish": "Polish",
+    "cs": "Czech",
+    "czech": "Czech",
+    "fil": "Filipino",
+    "tl": "Filipino",
+    "filipino": "Filipino",
+    "fa": "Persian",
+    "persian": "Persian",
+    "el": "Greek",
+    "greek": "Greek",
+    "ro": "Romanian",
+    "romanian": "Romanian",
+    "hu": "Hungarian",
+    "hungarian": "Hungarian",
+    "mk": "Macedonian",
+    "macedonian": "Macedonian",
+}
+
+
+def _openai_error_response(
+    *,
+    message: str,
+    status_code: int = 400,
+    error_type: str = "invalid_request_error",
+    param: str | None = None,
+    code: str | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "message": message,
+                "type": error_type,
+                "param": param,
+                "code": code,
+            }
+        },
+    )
+
+
+def _openai_http_exception(exc: HTTPException) -> JSONResponse:
+    detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+    return _openai_error_response(message=detail, status_code=exc.status_code)
+
+
+def _form_string(form: Any, name: str, default: str = "") -> str:
+    value = form.get(name)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _form_bool(form: Any, name: str, default: bool = False) -> bool:
+    value = form.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _form_list(form: Any, name: str) -> list[str]:
+    values = []
+    for key in (name, f"{name}[]"):
+        if hasattr(form, "getlist"):
+            values.extend(form.getlist(key))
+        elif form.get(key) is not None:
+            values.append(form.get(key))
+    out: list[str] = []
+    for value in values:
+        if value is None:
+            continue
+        for item in str(value).split(","):
+            item = item.strip()
+            if item:
+                out.append(item)
+    return out
+
+
+def _normalize_openai_language(language: str) -> str:
+    value = (language or "").strip()
+    if not value:
+        raise ValueError("language is empty")
+    resolved = LANGUAGE_ALIASES.get(value.lower(), normalize_language_name(value))
+    validate_language(resolved)
+    return resolved
+
+
+def _validate_temperature(value: str) -> None:
+    if value.strip() == "":
+        return
+    try:
+        temperature = float(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="temperature must be a number") from exc
+    if temperature != 0.0:
+        raise HTTPException(
+            status_code=400,
+            detail="Only temperature=0 is supported because deterministic transcription is required.",
+        )
+
+
+def _validate_model(model: str, model_name: str) -> None:
+    if model and model not in {model_name, *MODEL_ALIASES}:
+        raise HTTPException(status_code=400, detail=f"Unsupported model: {model}")
+
+
+def _validate_response_format(response_format: str) -> str:
+    resolved = response_format or "json"
+    if resolved not in RESPONSE_FORMATS:
+        raise HTTPException(status_code=400, detail=f"Unsupported response_format: {response_format}")
+    return resolved
+
+
+def _validate_timestamp_granularities(values: Iterable[str]) -> list[str]:
+    out = []
+    for value in values:
+        normalized = value.strip().lower()
+        if normalized not in TIMESTAMP_GRANULARITIES:
+            raise HTTPException(status_code=400, detail=f"Unsupported timestamp granularity: {value}")
+        if normalized not in out:
+            out.append(normalized)
+    return out
+
+
+def _align_items(item: Any) -> list[Any]:
+    timestamps = getattr(item, "time_stamps", None)
+    if timestamps is None:
+        return []
+    return list(getattr(timestamps, "items", timestamps) or [])
+
+
+def _words_payload(item: Any) -> list[dict[str, Any]]:
+    words = []
+    for span in _align_items(item):
+        words.append(
+            {
+                "word": getattr(span, "text", ""),
+                "start": float(getattr(span, "start_time", 0.0)),
+                "end": float(getattr(span, "end_time", 0.0)),
+            }
+        )
+    return words
+
+
+def _segments_payload(item: Any) -> list[dict[str, Any]]:
+    words = _words_payload(item)
+    if not words:
+        return []
+    return [
+        {
+            "id": 0,
+            "seek": 0,
+            "start": words[0]["start"],
+            "end": words[-1]["end"],
+            "text": item.text,
+            "tokens": [],
+            "temperature": 0.0,
+            "avg_logprob": None,
+            "compression_ratio": None,
+            "no_speech_prob": None,
+        }
+    ]
+
+
+def _duration(item: Any) -> float | None:
+    words = _words_payload(item)
+    if words:
+        return words[-1]["end"]
+    return None
+
+
+def _timestamp(seconds: float, *, decimal: str) -> str:
+    seconds = max(0.0, float(seconds))
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int(round((seconds - int(seconds)) * 1000))
+    return f"{hours:02}:{minutes:02}:{secs:02}{decimal}{millis:03}"
+
+
+def _srt_response(item: Any) -> PlainTextResponse:
+    end = _duration(item) or 0.001
+    body = f"1\n{_timestamp(0, decimal=',')} --> {_timestamp(end, decimal=',')}\n{item.text}\n"
+    return PlainTextResponse(body, media_type="application/x-subrip")
+
+
+def _vtt_response(item: Any) -> PlainTextResponse:
+    end = _duration(item) or 0.001
+    body = f"WEBVTT\n\n{_timestamp(0, decimal='.')} --> {_timestamp(end, decimal='.')}\n{item.text}\n"
+    return PlainTextResponse(body, media_type="text/vtt")
+
+
+def _json_response(item: Any, *, response_format: str, timestamp_granularities: list[str]) -> Any:
+    if response_format == "text":
+        return PlainTextResponse(item.text)
+    if response_format == "srt":
+        return _srt_response(item)
+    if response_format == "vtt":
+        return _vtt_response(item)
+    if response_format == "verbose_json":
+        payload: dict[str, Any] = {
+            "text": item.text,
+            "language": item.language,
+            "duration": _duration(item),
+            "segments": _segments_payload(item) if "segment" in timestamp_granularities else [],
+        }
+        if "word" in timestamp_granularities:
+            payload["words"] = _words_payload(item)
+        return payload
+    return {"text": item.text}
+
+
+def _sse_event(event_type: str, payload: dict[str, Any]) -> str:
+    payload = {"type": event_type, **payload}
+    return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _stream_response(item: Any) -> StreamingResponse:
+    async def events():
+        if item.text:
+            yield _sse_event("transcript.text.delta", {"delta": item.text})
+        yield _sse_event("transcript.text.done", {"text": item.text})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 def _coerce_special_types(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -40,6 +318,18 @@ def create_app(
     app = FastAPI(title="Qwen3-ASR OpenAI-compatible API")
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
 
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        return _openai_http_exception(exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return _openai_error_response(
+            message=str(exc),
+            status_code=422,
+            error_type="invalid_request_error",
+        )
+
     @app.get("/health")
     def health() -> Dict[str, Any]:
         return {"status": "ok", "model": model_name}
@@ -57,28 +347,59 @@ def create_app(
             ],
         }
 
+    @app.get("/v1/models/{requested_model:path}")
+    def retrieve_model(requested_model: str) -> Dict[str, Any]:
+        _validate_model(requested_model, model_name)
+        return {
+            "id": model_name if requested_model in MODEL_ALIASES else requested_model,
+            "object": "model",
+            "owned_by": "hangry-labs",
+        }
+
     @app.post("/v1/audio/transcriptions")
-    async def transcriptions(
-        file: UploadFile = File(...),
-        model: str = Form(default=""),
-        language: str = Form(default=""),
-        response_format: str = Form(default="json"),
-    ):
+    async def transcriptions(request: Request):
         with optional_timer("transcription request", trace_requests):
-            if model and model not in {model_name, "qwen3-asr", "qwen3-asr-stt"}:
-                raise HTTPException(status_code=400, detail=f"Unsupported model: {model}")
+            form = await request.form()
 
-            forced_language = None
-            if language.strip():
-                forced_language = normalize_language_name(language)
-                try:
-                    validate_language(forced_language)
-                except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            upload = form.get("file")
+            if not isinstance(upload, (UploadFile, StarletteUploadFile)):
+                raise HTTPException(status_code=400, detail="Missing required multipart file field: file")
 
-            suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+            try:
+                model = _form_string(form, "model")
+                _validate_model(model, model_name)
+
+                forced_language = None
+                language = _form_string(form, "language")
+                if language.strip():
+                    try:
+                        forced_language = _normalize_openai_language(language)
+                    except ValueError as exc:
+                        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+                response_format = _validate_response_format(_form_string(form, "response_format", "json"))
+                timestamp_granularities = _validate_timestamp_granularities(_form_list(form, "timestamp_granularities"))
+                include = _form_list(form, "include")
+                if include:
+                    raise HTTPException(status_code=400, detail=f"Unsupported include values: {include}")
+                _validate_temperature(_form_string(form, "temperature"))
+                stream = _form_bool(form, "stream")
+                prompt = _form_string(form, "prompt")
+
+                return_time_stamps = bool(timestamp_granularities)
+                if return_time_stamps and getattr(asr, "forced_aligner", None) is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="timestamp_granularities requires QWEN_ASR_ENABLE_ALIGNER=1",
+                    )
+            except HTTPException:
+                await upload.close()
+                raise
+
+            suffix = Path(upload.filename or "audio.wav").suffix or ".wav"
             with optional_timer("read uploaded audio", trace_requests):
-                payload = await file.read()
+                payload = await upload.read()
+                await upload.close()
             if not payload:
                 raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
 
@@ -93,25 +414,33 @@ def create_app(
                         result = await asyncio.to_thread(
                             asr.transcribe,
                             audio=tmp_path,
+                            context=prompt,
                             language=forced_language,
-                            return_time_stamps=False,
+                            return_time_stamps=return_time_stamps,
                         )
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
 
             item = result[0]
-            if response_format == "text":
-                return PlainTextResponse(item.text)
-            if response_format in {"json", ""}:
-                return {"text": item.text}
-            if response_format == "verbose_json":
-                return {
-                    "text": item.text,
-                    "language": item.language,
-                    "duration": None,
-                    "segments": [],
-                }
-            raise HTTPException(status_code=400, detail=f"Unsupported response_format: {response_format}")
+            if stream:
+                if response_format not in {"json", "text"}:
+                    raise HTTPException(status_code=400, detail="stream=true supports response_format json or text")
+                return _stream_response(item)
+            return _json_response(
+                item,
+                response_format=response_format,
+                timestamp_granularities=timestamp_granularities,
+            )
+
+    @app.post("/v1/audio/translations")
+    async def translations(request: Request):
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "/v1/audio/translations is not implemented yet. "
+                "Qwen3-ASR translation mode needs a dedicated compatibility pass before it is advertised."
+            ),
+        )
 
     @app.get("/v1/audio/supported_languages")
     def supported_languages() -> Dict[str, Any]:

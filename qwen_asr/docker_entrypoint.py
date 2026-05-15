@@ -87,11 +87,28 @@ def _backend_kwargs() -> dict[str, Any]:
     if enforce_eager is not None:
         kwargs["enforce_eager"] = enforce_eager
 
+    performance_profile = (os.getenv("QWEN_ASR_PERFORMANCE_PROFILE", "custom") or "custom").strip().lower()
+    if performance_profile not in {"balanced", "throughput", "custom"}:
+        raise ValueError(
+            "QWEN_ASR_PERFORMANCE_PROFILE must be one of: balanced, throughput, custom"
+        )
+
     compilation_mode = _int_env("QWEN_ASR_COMPILATION_MODE")
     capture_sizes = _str_env("QWEN_ASR_CUDAGRAPH_CAPTURE_SIZES")
     max_capture_size = _int_env("QWEN_ASR_MAX_CUDAGRAPH_CAPTURE_SIZE")
     cudagraph_mode = _str_env("QWEN_ASR_CUDAGRAPH_MODE")
-    if (
+
+    if performance_profile == "balanced":
+        capture_sizes = capture_sizes or "1,2"
+        max_capture_size = max_capture_size if max_capture_size is not None else 2
+        cudagraph_mode = cudagraph_mode or "PIECEWISE"
+    elif performance_profile == "throughput":
+        compilation_mode = None
+        capture_sizes = None
+        max_capture_size = None
+        cudagraph_mode = None
+
+    if performance_profile != "throughput" and (
         compilation_mode is not None
         or capture_sizes is not None
         or max_capture_size is not None
