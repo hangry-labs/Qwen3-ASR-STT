@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
+import os
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -25,9 +26,15 @@ from qwen_asr.core.transformers_backend import (
 )
 from transformers import AutoConfig, AutoModel, AutoProcessor
 
+from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
+
 AutoConfig.register("qwen3_asr", Qwen3ASRConfig)
 AutoModel.register(Qwen3ASRConfig, Qwen3ASRForConditionalGeneration)
 AutoProcessor.register(Qwen3ASRConfig, Qwen3ASRProcessor)
+
+
+def _trace_requests_enabled() -> bool:
+    return os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "y"}
 
 from .qwen3_forced_aligner import Qwen3ForcedAligner
 from .utils import (
@@ -47,11 +54,12 @@ from .utils import (
 )
 
 try:
-    from qwen_asr.core.vllm_backend import Qwen3ASRForConditionalGeneration
-    from vllm import ModelRegistry
-    ModelRegistry.register_model("Qwen3ASRForConditionalGeneration", Qwen3ASRForConditionalGeneration)
-except:
-    pass
+    with StartupTimer("register custom vLLM Qwen3-ASR model"):
+        from qwen_asr.core.vllm_backend import Qwen3ASRForConditionalGeneration
+        from vllm import ModelRegistry
+        ModelRegistry.register_model("Qwen3ASRForConditionalGeneration", Qwen3ASRForConditionalGeneration)
+except Exception as exc:
+    log_startup(f"custom vLLM model registration skipped: {type(exc).__name__}: {exc}")
 
 
 @dataclass
@@ -203,15 +211,20 @@ class Qwen3ASRModel:
             Qwen3ASRModel
         """
 
-        model = AutoModel.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        log_startup(f"Transformers backend kwargs: {kwargs}")
 
-        processor = AutoProcessor.from_pretrained(pretrained_model_name_or_path, fix_mistral_regex=True)
+        with StartupTimer("load Transformers model"):
+            model = AutoModel.from_pretrained(pretrained_model_name_or_path, **kwargs)
+
+        with StartupTimer("load Transformers processor"):
+            processor = AutoProcessor.from_pretrained(pretrained_model_name_or_path, fix_mistral_regex=True)
 
         forced_aligner_model = None
         if forced_aligner is not None:
-            forced_aligner_model = Qwen3ForcedAligner.from_pretrained(
-                forced_aligner, **(forced_aligner_kwargs or {})
-            )
+            with StartupTimer("load forced aligner"):
+                forced_aligner_model = Qwen3ForcedAligner.from_pretrained(
+                    forced_aligner, **(forced_aligner_kwargs or {})
+                )
 
         return cls(
             backend="transformers",
@@ -258,17 +271,21 @@ class Qwen3ASRModel:
         Raises:
             ImportError: If vLLM is not installed.
         """
+        log_startup(f"vLLM backend kwargs: {kwargs}")
         try:
-            from vllm import LLM as vLLM
-            from vllm import SamplingParams
+            with StartupTimer("import vLLM runtime classes"):
+                from vllm import LLM as vLLM
+                from vllm import SamplingParams
         except Exception as e:
             raise ImportError(
                 "vLLM is not available. Install with: pip install qwen-asr[vllm]"
             ) from e
 
-        llm = vLLM(model=model, **kwargs)
+        with StartupTimer("initialize vLLM LLM"):
+            llm = vLLM(model=model, **kwargs)
 
-        processor = Qwen3ASRProcessor.from_pretrained(model, fix_mistral_regex=True)
+        with StartupTimer("load Qwen3-ASR processor"):
+            processor = Qwen3ASRProcessor.from_pretrained(model, fix_mistral_regex=True)
         # ASR/translation must remain deterministic: preserve the upstream
         # explicit zero-temperature sampling instead of falling back to model
         # generation config defaults.
@@ -276,9 +293,10 @@ class Qwen3ASRModel:
 
         forced_aligner_model = None
         if forced_aligner is not None:
-            forced_aligner_model = Qwen3ForcedAligner.from_pretrained(
-                forced_aligner, **(forced_aligner_kwargs or {})
-            )
+            with StartupTimer("load forced aligner"):
+                forced_aligner_model = Qwen3ForcedAligner.from_pretrained(
+                    forced_aligner, **(forced_aligner_kwargs or {})
+                )
 
         return cls(
             backend="vllm",
@@ -298,6 +316,26 @@ class Qwen3ASRModel:
             List[str]: Canonical language names.
         """
         return list(SUPPORTED_LANGUAGES)
+
+    def warm_up(self, *, max_new_tokens: int = 1) -> None:
+        """
+        Run a minimal decode so lazy backend initialization happens before
+        the service reports ready.
+        """
+        if self.backend != "vllm":
+            return
+
+        original_sampling_params = self.sampling_params
+        if original_sampling_params is None:
+            return
+
+        sampling_cls = type(original_sampling_params)
+        try:
+            self.sampling_params = sampling_cls(temperature=0.0, max_tokens=max(1, int(max_new_tokens)))
+            silence = np.zeros((SAMPLE_RATE // 2,), dtype=np.float32)
+            self.transcribe(audio=(silence, SAMPLE_RATE), language="English", return_time_stamps=False)
+        finally:
+            self.sampling_params = original_sampling_params
 
     @torch.no_grad()
     def transcribe(
@@ -338,7 +376,10 @@ class Qwen3ASRModel:
         if return_time_stamps and self.forced_aligner is None:
             raise ValueError("return_time_stamps=True requires `forced_aligner` to be provided at initialization.")
 
-        wavs = normalize_audios(audio)
+        trace_requests = _trace_requests_enabled()
+
+        with optional_timer("normalize request audio", trace_requests):
+            wavs = normalize_audios(audio)
         n = len(wavs)
 
         ctxs = context if isinstance(context, list) else [context]
@@ -369,29 +410,32 @@ class Qwen3ASRModel:
         max_chunk_sec = MAX_FORCE_ALIGN_INPUT_SECONDS if return_time_stamps else MAX_ASR_INPUT_SECONDS
 
         # chunk audios and record mapping
-        chunks: List[AudioChunk] = []
-        for i, wav in enumerate(wavs):
-            parts = split_audio_into_chunks(
-                wav=wav,
-                sr=SAMPLE_RATE,
-                max_chunk_sec=max_chunk_sec,
-            )
-            for j, (cwav, offset_sec) in enumerate(parts):
-                chunks.append(AudioChunk(orig_index=i, chunk_index=j, wav=cwav, sr=SAMPLE_RATE, offset_sec=offset_sec))
+        with optional_timer("split request audio into chunks", trace_requests):
+            chunks: List[AudioChunk] = []
+            for i, wav in enumerate(wavs):
+                parts = split_audio_into_chunks(
+                    wav=wav,
+                    sr=SAMPLE_RATE,
+                    max_chunk_sec=max_chunk_sec,
+                )
+                for j, (cwav, offset_sec) in enumerate(parts):
+                    chunks.append(AudioChunk(orig_index=i, chunk_index=j, wav=cwav, sr=SAMPLE_RATE, offset_sec=offset_sec))
 
         # run ASR on chunks
         chunk_ctx: List[str] = [ctxs[c.orig_index] for c in chunks]
         chunk_lang: List[Optional[str]] = [langs_norm[c.orig_index] for c in chunks]
         chunk_wavs: List[np.ndarray] = [c.wav for c in chunks]
-        raw_outputs = self._infer_asr(chunk_ctx, chunk_wavs, chunk_lang)
+        with optional_timer(f"infer ASR chunks count={len(chunks)} backend={self.backend}", trace_requests):
+            raw_outputs = self._infer_asr(chunk_ctx, chunk_wavs, chunk_lang)
 
         # parse outputs, prepare for optional alignment
         per_chunk_lang: List[str] = []
         per_chunk_text: List[str] = []
-        for out, forced_lang in zip(raw_outputs, chunk_lang):
-            lang, txt = parse_asr_output(out, user_language=forced_lang)
-            per_chunk_lang.append(lang)
-            per_chunk_text.append(txt)
+        with optional_timer("parse ASR output", trace_requests):
+            for out, forced_lang in zip(raw_outputs, chunk_lang):
+                lang, txt = parse_asr_output(out, user_language=forced_lang)
+                per_chunk_lang.append(lang)
+                per_chunk_text.append(txt)
 
         # forced alignment (optional)
         per_chunk_align: List[Optional[Any]] = [None] * len(chunks)
@@ -528,13 +572,17 @@ class Qwen3ASRModel:
         languages: List[Optional[str]],
     ) -> List[str]:
         inputs: List[Dict[str, Any]] = []
-        for c, w, fl in zip(contexts, wavs, languages):
-            prompt = self._build_text_prompt(context=c, force_language=fl)
-            inputs.append({"prompt": prompt, "multi_modal_data": {"audio": [w]}})
+        trace_requests = _trace_requests_enabled()
+
+        with optional_timer(f"build vLLM ASR prompts count={len(wavs)}", trace_requests):
+            for c, w, fl in zip(contexts, wavs, languages):
+                prompt = self._build_text_prompt(context=c, force_language=fl)
+                inputs.append({"prompt": prompt, "multi_modal_data": {"audio": [w]}})
 
         outs: List[str] = []
         for batch in chunk_list(inputs, self.max_inference_batch_size):
-            outputs = self.model.generate(batch, sampling_params=self.sampling_params, use_tqdm=False)
+            with optional_timer(f"vLLM generate batch size={len(batch)}", trace_requests):
+                outputs = self.model.generate(batch, sampling_params=self.sampling_params, use_tqdm=False)
             for o in outputs:
                 outs.append(o.outputs[0].text)
         return outs

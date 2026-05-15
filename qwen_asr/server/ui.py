@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import gradio as gr
 import numpy as np
 import torch
-from qwen_asr import Qwen3ASRModel
+from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
+from qwen_asr.startup_logging import StartupTimer, log_startup
 from scipy.io.wavfile import write as wav_write
 
 
@@ -397,7 +398,10 @@ def run_server(
     ssl_keyfile: str | None = None,
     ssl_verify: bool = True,
 ) -> None:
+    log_startup("Gradio UI startup entered")
     _apply_cuda_visible_devices(cuda_visible_devices)
+    if cuda_visible_devices.strip():
+        log_startup(f"CUDA_VISIBLE_DEVICES set to {cuda_visible_devices.strip()}")
 
     asr_ckpt = asr_checkpoint
     aligner_ckpt = aligner_checkpoint
@@ -405,8 +409,9 @@ def run_server(
     user_backend_kwargs = backend_kwargs or {}
     user_aligner_kwargs = aligner_kwargs or {}
 
-    backend_kwargs = _merge_dicts(_default_backend_kwargs(backend), user_backend_kwargs)
-    backend_kwargs = _coerce_special_types(backend_kwargs)
+    with StartupTimer("prepare backend kwargs"):
+        backend_kwargs = _merge_dicts(_default_backend_kwargs(backend), user_backend_kwargs)
+        backend_kwargs = _coerce_special_types(backend_kwargs)
 
     forced_aligner = None
     forced_aligner_kwargs = None
@@ -415,22 +420,30 @@ def run_server(
         aligner_kwargs = _merge_dicts(_default_aligner_kwargs(), user_aligner_kwargs)
         forced_aligner_kwargs = _coerce_special_types(aligner_kwargs)
 
-    if backend == "transformers":
-        asr = Qwen3ASRModel.from_pretrained(
-            asr_ckpt,
-            forced_aligner=forced_aligner,
-            forced_aligner_kwargs=forced_aligner_kwargs,
-            **backend_kwargs,
-        )
-    else:
-        asr = Qwen3ASRModel.LLM(
-            model=asr_ckpt,
-            forced_aligner=forced_aligner,
-            forced_aligner_kwargs=forced_aligner_kwargs,
-            **backend_kwargs,
-        )
+    with StartupTimer(f"load ASR model via {backend} backend"):
+        if backend == "transformers":
+            asr = Qwen3ASRModel.from_pretrained(
+                asr_ckpt,
+                forced_aligner=forced_aligner,
+                forced_aligner_kwargs=forced_aligner_kwargs,
+                **backend_kwargs,
+            )
+        else:
+            asr = Qwen3ASRModel.LLM(
+                model=asr_ckpt,
+                forced_aligner=forced_aligner,
+                forced_aligner_kwargs=forced_aligner_kwargs,
+                **backend_kwargs,
+            )
 
-    demo = build_demo(asr, asr_ckpt, backend, aligner_ckpt=aligner_ckpt)
+    warmup_enabled = os.getenv("QWEN_ASR_STARTUP_WARMUP", "0").strip().lower() in {"1", "true", "yes", "y"}
+    if warmup_enabled:
+        warmup_tokens = int(os.getenv("QWEN_ASR_STARTUP_WARMUP_TOKENS", "1"))
+        with StartupTimer(f"startup ASR warmup max_new_tokens={warmup_tokens}"):
+            asr.warm_up(max_new_tokens=warmup_tokens)
+
+    with StartupTimer("build Gradio demo"):
+        demo = build_demo(asr, asr_ckpt, backend, aligner_ckpt=aligner_ckpt)
 
     launch_kwargs: Dict[str, Any] = dict(
         server_name=host,
@@ -446,4 +459,5 @@ def run_server(
     launch_kwargs["theme"] = getattr(demo, "_qwen_asr_launch_theme")
     launch_kwargs["css"] = getattr(demo, "_qwen_asr_launch_css")
 
+    log_startup(f"starting Gradio on {host}:{port}")
     demo.queue(default_concurrency_limit=int(concurrency)).launch(**launch_kwargs)

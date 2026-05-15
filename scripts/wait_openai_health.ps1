@@ -3,7 +3,7 @@ param(
     [string]$ExpectedModel = "",
     [string]$Container = "",
     [int]$TimeoutSeconds = 600,
-    [int]$PollSeconds = 5
+    [int]$PollSeconds = 1
 )
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -11,7 +11,7 @@ $healthUrl = $BaseUrl.TrimEnd("/") + "/health"
 
 while ((Get-Date) -lt $deadline) {
     try {
-        $response = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5
+        $response = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2
         $json = $response | ConvertTo-Json -Compress
         Write-Host $json
 

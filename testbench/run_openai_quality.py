@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import re
 import time
 import tomllib
@@ -65,10 +66,11 @@ def _language_columns(manifest: dict[str, Any], cases: list[dict[str, Any]]) -> 
 
 def _ensure_summary_md(path: Path, language_columns: list[str]) -> None:
     if path.exists() and path.read_text(encoding="utf-8").strip():
+        _ensure_summary_comment_column(path)
         return
 
-    headers = ["Version", "Model", "Test time", "Total score %", "Bonus %", "Total time", *language_columns]
-    aligns = ["---", "---", "---", "---:", "---:", "---", *(["---:"] * len(language_columns))]
+    headers = ["Version", "Model", "Comment", "Test time", "Total score %", "Bonus %", "Total time", *language_columns]
+    aligns = ["---", "---", "---", "---", "---:", "---:", "---", *(["---:"] * len(language_columns))]
     content = [
         "# Qwen3-ASR Transcription Benchmarks",
         "",
@@ -79,6 +81,46 @@ def _ensure_summary_md(path: Path, language_columns: list[str]) -> None:
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(content) + "\n", encoding="utf-8")
+
+
+def _split_md_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _join_md_row(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
+
+
+def _ensure_summary_comment_column(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header_index = next(
+        (index for index, line in enumerate(lines) if line.startswith("|") and "Version" in line and "Model" in line),
+        None,
+    )
+    if header_index is None:
+        return
+    headers = _split_md_row(lines[header_index])
+    if "Comment" in headers:
+        return
+    try:
+        model_index = headers.index("Model")
+    except ValueError:
+        return
+    insert_index = model_index + 1
+    for index in range(header_index, len(lines)):
+        if not lines[index].startswith("|"):
+            continue
+        cells = _split_md_row(lines[index])
+        if len(cells) <= insert_index:
+            continue
+        if index == header_index:
+            cells.insert(insert_index, "Comment")
+        elif index == header_index + 1:
+            cells.insert(insert_index, "---")
+        else:
+            cells.insert(insert_index, "")
+        lines[index] = _join_md_row(cells)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _validate_summary_md(path: Path) -> None:
@@ -235,6 +277,7 @@ def main() -> int:
     parser.add_argument("--output", default="testbench/results/latest.json")
     parser.add_argument("--summary-md", default="benchmarks/transcription/BENCHMARKS.md")
     parser.add_argument("--details-md", default="benchmarks/transcription/DETAILS.md")
+    parser.add_argument("--comment", default=os.environ.get("BENCHMARK_COMMENT", ""))
     parser.add_argument("--no-append", action="store_true")
     parser.add_argument("--strict-exit", action="store_true")
     args = parser.parse_args()
@@ -256,17 +299,17 @@ def main() -> int:
         item = _run_case(endpoint, args.model, root, case, args.request_timeout)
         prewarm_results.append(item)
         status = "OK" if not item.get("error") else "ERR"
-        print(f"PREWARM {status} {case['id']} {item['elapsed_sec']}s")
+        print(f"PREWARM {status} {case['id']} {item['elapsed_sec']}s", flush=True)
     prewarm_elapsed = round(time.time() - prewarm_started, 3) if prewarm_cases else 0.0
 
     results = []
-    print(f"MEASURE START cases={len(cases)} prewarm_discarded={len(prewarm_results)}")
+    print(f"MEASURE START cases={len(cases)} prewarm_discarded={len(prewarm_results)}", flush=True)
     started = time.time()
     for case in cases:
         item = _run_case(endpoint, args.model, root, case, args.request_timeout)
         results.append(item)
         status = "PASS" if item.get("total_score", 0.0) >= 90.0 else "FAIL"
-        print(f"{status} {case['id']} {item.get('total_score', 0.0)}% {item['elapsed_sec']}s")
+        print(f"{status} {case['id']} {item.get('total_score', 0.0)}% {item['elapsed_sec']}s", flush=True)
 
     passed = sum(1 for item in results if item.get("total_score", 0.0) >= 90.0)
     total_score = sum(item.get("score", 0.0) for item in results) / len(results) if results else 0.0
@@ -315,7 +358,8 @@ def main() -> int:
         _append_line(
             summary_md,
             (
-                f"| {_md_escape(output['version'])} | {_md_escape(args.model_label or args.model)} | {run_time} | "
+                f"| {_md_escape(output['version'])} | {_md_escape(args.model_label or args.model)} | "
+                f"{_md_escape(args.comment)} | {run_time} | "
                 f"{output['total_score']:.2f}% | {output['bonus']:.2f}% | "
                 f"{output['elapsed_sec']:.3f}s | "
                 f"{' | '.join(_md_escape(value) for value in language_cells)} |\n"
@@ -329,6 +373,7 @@ def main() -> int:
             f"## {run_time} - {args.model_label or args.model}",
             "",
             f"- Version: `{output['version']}`",
+            f"- Comment: `{args.comment}`" if args.comment else "- Comment: ``",
             f"- Total score: `{output['total_score']:.2f}%`",
             f"- Bonus: `{output['bonus']:.2f}%`",
             f"- Total time: `{output['elapsed_sec']:.3f}s`",

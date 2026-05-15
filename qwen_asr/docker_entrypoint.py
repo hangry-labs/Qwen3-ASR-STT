@@ -4,8 +4,7 @@ import json
 import os
 from typing import Any
 
-from qwen_asr.server.openai_api import run_server as run_openai_api
-from qwen_asr.server.ui import run_server as run_ui
+from qwen_asr.startup_logging import StartupTimer, log_startup
 
 
 def _enabled(value: str | None, default: bool = False) -> bool:
@@ -84,6 +83,33 @@ def _backend_kwargs() -> dict[str, Any]:
     if calculate_kv_scales is not None:
         kwargs["calculate_kv_scales"] = calculate_kv_scales
 
+    enforce_eager = _bool_env("QWEN_ASR_ENFORCE_EAGER")
+    if enforce_eager is not None:
+        kwargs["enforce_eager"] = enforce_eager
+
+    compilation_mode = _int_env("QWEN_ASR_COMPILATION_MODE")
+    capture_sizes = _str_env("QWEN_ASR_CUDAGRAPH_CAPTURE_SIZES")
+    max_capture_size = _int_env("QWEN_ASR_MAX_CUDAGRAPH_CAPTURE_SIZE")
+    cudagraph_mode = _str_env("QWEN_ASR_CUDAGRAPH_MODE")
+    if (
+        compilation_mode is not None
+        or capture_sizes is not None
+        or max_capture_size is not None
+        or cudagraph_mode is not None
+    ):
+        compilation_config = dict(kwargs.get("compilation_config") or {})
+        if compilation_mode is not None:
+            compilation_config["mode"] = compilation_mode
+        if capture_sizes is not None:
+            compilation_config["cudagraph_capture_sizes"] = [
+                int(item.strip()) for item in capture_sizes.split(",") if item.strip()
+            ]
+        if max_capture_size is not None:
+            compilation_config["max_cudagraph_capture_size"] = max_capture_size
+        if cudagraph_mode is not None:
+            compilation_config["cudagraph_mode"] = cudagraph_mode
+        kwargs["compilation_config"] = compilation_config
+
     raw_kwargs = os.getenv("QWEN_ASR_BACKEND_KWARGS")
     if raw_kwargs and raw_kwargs.strip():
         extra = json.loads(raw_kwargs)
@@ -95,6 +121,7 @@ def _backend_kwargs() -> dict[str, Any]:
 
 
 def main() -> int:
+    log_startup("docker entrypoint started")
     host = os.getenv("HOST", "0.0.0.0")
     port = os.getenv("PORT", "8000")
     app_mode = os.getenv("QWEN_ASR_APP", "demo").strip().lower()
@@ -109,12 +136,14 @@ def main() -> int:
     aligner_kwargs_value = _json_arg(aligner_kwargs)
     resolved_aligner_kwargs = json.loads(aligner_kwargs_value[0]) if aligner_kwargs_value else None
 
-    print(
-        f"Starting Qwen3-ASR {app_mode}: model={asr_model} backend={backend} "
-        f"host={host} port={port} concurrency={concurrency} backend_kwargs={backend_kwargs}",
-        flush=True,
+    log_startup(
+        f"configuration resolved: app={app_mode} model={asr_model} backend={backend} "
+        f"host={host} port={port} concurrency={concurrency} backend_kwargs={backend_kwargs}"
     )
     if app_mode in {"api", "openai", "server"}:
+        with StartupTimer("import OpenAI-compatible API server"):
+            from qwen_asr.server.openai_api import run_server as run_openai_api
+
         run_openai_api(
             asr_checkpoint=asr_model,
             backend=backend,
@@ -125,6 +154,9 @@ def main() -> int:
             concurrency=int(concurrency),
         )
     else:
+        with StartupTimer("import Gradio UI server"):
+            from qwen_asr.server.ui import run_server as run_ui
+
         run_ui(
             asr_checkpoint=asr_model,
             aligner_checkpoint=aligner_model
