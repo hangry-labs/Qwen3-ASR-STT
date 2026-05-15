@@ -1,0 +1,225 @@
+version: '3'
+
+vars:
+  IMAGE: qwen3-asr-stt:test
+  TINY_IMAGE: qwen3-asr-stt:tiny
+  PORT: '8000'
+  GPU_DEVICE: '1'
+  HF_TOKEN: ''
+  HF_CACHE_VOLUME: qwen3_asr_stt_hf_cache
+  HF_HUB_OFFLINE: '1'
+  TRANSFORMERS_OFFLINE: '1'
+  TRANSFORMERS_VERBOSITY: 'error'
+  CONTAINER: qwen3_asr_stt
+  CONTAINER_LOCAL: qwen3_asr_stt_local
+  API_CONTAINER: qwen3_asr_stt_api
+  APP_MODE: 'demo'
+  ASR_BACKEND: 'vllm'
+  ASR_MODEL: 'Qwen/Qwen3-ASR-1.7B'
+  ASR_06B_MODEL: 'Qwen/Qwen3-ASR-0.6B'
+  GGUF_17B_MODEL: 'ggml-org/Qwen3-ASR-1.7B-GGUF'
+  GGUF_06B_Q4_MODEL: 'OpenVoiceOS/qwen3-asr-0.6b-q4-k-m'
+  PREFETCH_MODELS: 'Qwen/Qwen3-ASR-1.7B'
+  PREFETCH_ALLOW_PATTERNS: ''
+  PREFETCH_ALIGNER: '1'
+  ALIGNER_MODEL: 'Qwen/Qwen3-ForcedAligner-0.6B'
+  ENABLE_ALIGNER: '0'
+  ASR_CONCURRENCY: '2'
+  GPU_MEMORY_UTILIZATION: '0.53'
+  MAX_MODEL_LEN: '4096'
+  MAX_INFERENCE_BATCH_SIZE: '2'
+  MAX_NEW_TOKENS: '1024'
+  GENERATION_CONFIG: 'vllm'
+  LOAD_FORMAT: 'safetensors'
+  KV_CACHE_DTYPE: 'auto'
+  CALCULATE_KV_SCALES: '0'
+  BACKEND_KWARGS: ''
+  ALIGNER_KWARGS: ''
+  TEMP_AUDIO: '%TEMP%\\qwen3_asr_stt_task_audio.wav'
+  SAMPLE_AUDIO_URL: 'https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/asr_en.wav'
+  QUALITY_BASE_URL: 'http://127.0.0.1:8000'
+  QUALITY_MODEL: 'qwen3-asr'
+  QUALITY_MODEL_LABEL: 'Qwen/Qwen3-ASR-0.6B'
+  QUALITY_LIMIT: '0'
+  QUALITY_PREWARM: '10'
+  QUALITY_LANGUAGE: ''
+  HEALTH_TIMEOUT_SECONDS: '600'
+  DRY_RUN: '0'
+  NEXT_VERSION: ''
+  SKIP_VALIDATION: '0'
+
+tasks:
+  list:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  gpuinfo:
+    desc: Show host GPU indexes
+    cmds:
+      - cmd /c nvidia-smi --query-gpu=index,name,memory.total,memory.used --format=csv,noheader
+
+  doctor:
+    desc: Show local tool and interpreter status
+    cmds:
+      - cmd /c python --version
+      - 'cmd /c ".venv\Scripts\python.exe" --version'
+      - cmd /c docker --version
+      - cmd /c docker compose version
+      - cmd /c task --version
+      - cmd /c git status --short
+
+  compile:
+    desc: Compile Python sources
+    cmds:
+      - 'cmd /c ".venv\Scripts\python.exe" -m compileall -q qwen_asr testbench examples'
+
+  deps:
+    desc: Regenerate Linux/Python 3.13 requirements.txt from requirements.in
+    cmds:
+      - uv pip compile requirements.in --python-version 3.13 --python-platform x86_64-manylinux_2_36 --index-strategy unsafe-best-match --upgrade --no-header --no-annotate --output-file requirements.txt
+
+  image:
+    desc: Build local baked Qwen3-ASR-STT Docker image
+    cmds:
+      - cmd /c docker build --target baked --build-arg QWEN_ASR_PREFETCH_MODELS={{.PREFETCH_MODELS}} --build-arg QWEN_ASR_PREFETCH_ALLOW_PATTERNS={{.PREFETCH_ALLOW_PATTERNS}} --build-arg QWEN_ASR_PREFETCH_ALIGNER={{.PREFETCH_ALIGNER}} -t {{.IMAGE}} .
+
+  image-tiny:
+    desc: Build local tiny Qwen3-ASR-STT Docker image without baked model cache
+    cmds:
+      - cmd /c docker build --target tiny -t {{.TINY_IMAGE}} .
+
+  cache-init:
+    desc: Seed persistent Hugging Face cache volume from the baked image
+    cmds:
+      - cmd /c docker volume create {{.HF_CACHE_VOLUME}} >nul
+      - cmd /c docker run --rm -v {{.HF_CACHE_VOLUME}}:/hf-cache {{.IMAGE}} sh -c "mkdir -p /hf-cache && cp -an /app/.cache/huggingface/. /hf-cache/ || true"
+
+  model-choices:
+    desc: Show known Qwen3-ASR model asset choices
+    cmds:
+      - cmd /c echo Qwen/Qwen3-ASR-1.7B
+      - cmd /c echo {{.ASR_06B_MODEL}}
+      - cmd /c echo {{.GGUF_17B_MODEL}}
+      - cmd /c echo {{.GGUF_06B_Q4_MODEL}}
+
+  cache-pull-models:
+    desc: Pull configured model assets into the persistent Hugging Face cache volume
+    cmds:
+      - cmd /c docker volume create {{.HF_CACHE_VOLUME}} >nul
+      - cmd /c docker run --rm -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e HF_TOKEN={{.HF_TOKEN}} -e QWEN_ASR_PREFETCH_MODELS={{.PREFETCH_MODELS}} -e QWEN_ASR_PREFETCH_ALLOW_PATTERNS={{.PREFETCH_ALLOW_PATTERNS}} -e QWEN_ASR_PREFETCH_ALIGNER={{.PREFETCH_ALIGNER}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -v {{.HF_CACHE_VOLUME}}:/app/.cache/huggingface -v "{{.TASKFILE_DIR}}\qwen_asr:/app/qwen_asr" {{.IMAGE}} python -u -m qwen_asr.prefetch_assets
+
+  imagerun:
+    desc: Run baked image with current Gradio UI on PORT, without external model cache mounts
+    cmds:
+      - cmd /c docker rm -f {{.CONTAINER}} >nul 2>&1
+      - cmd /c docker rm -f {{.CONTAINER_LOCAL}} >nul 2>&1
+      - cmd /c docker run -d --name {{.CONTAINER}} -p {{.PORT}}:8000 --gpus all -e CUDA_VISIBLE_DEVICES={{.GPU_DEVICE}} -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e PORT=8000 -e HF_TOKEN={{.HF_TOKEN}} -e HF_HUB_OFFLINE={{.HF_HUB_OFFLINE}} -e TRANSFORMERS_OFFLINE={{.TRANSFORMERS_OFFLINE}} -e TRANSFORMERS_VERBOSITY={{.TRANSFORMERS_VERBOSITY}} -e QWEN_ASR_APP={{.APP_MODE}} -e QWEN_ASR_BACKEND={{.ASR_BACKEND}} -e QWEN_ASR_MODEL={{.ASR_MODEL}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -e QWEN_ASR_ENABLE_ALIGNER={{.ENABLE_ALIGNER}} -e QWEN_ASR_CONCURRENCY={{.ASR_CONCURRENCY}} -e QWEN_ASR_GPU_MEMORY_UTILIZATION={{.GPU_MEMORY_UTILIZATION}} -e QWEN_ASR_MAX_MODEL_LEN={{.MAX_MODEL_LEN}} -e QWEN_ASR_MAX_INFERENCE_BATCH_SIZE={{.MAX_INFERENCE_BATCH_SIZE}} -e QWEN_ASR_MAX_NEW_TOKENS={{.MAX_NEW_TOKENS}} -e QWEN_ASR_GENERATION_CONFIG={{.GENERATION_CONFIG}} -e QWEN_ASR_LOAD_FORMAT={{.LOAD_FORMAT}} -e QWEN_ASR_KV_CACHE_DTYPE={{.KV_CACHE_DTYPE}} -e QWEN_ASR_CALCULATE_KV_SCALES={{.CALCULATE_KV_SCALES}} {{.IMAGE}}
+      - cmd /c docker ps --filter "name={{.CONTAINER}}"
+
+  imagerun-tiny:
+    desc: Run tiny image online on first use, using persistent Hugging Face cache volume
+    cmds:
+      - cmd /c docker rm -f {{.CONTAINER}} >nul 2>&1
+      - cmd /c docker rm -f {{.CONTAINER_LOCAL}} >nul 2>&1
+      - cmd /c docker volume create {{.HF_CACHE_VOLUME}} >nul
+      - cmd /c docker run -d --name {{.CONTAINER}} -p {{.PORT}}:8000 --gpus all -e CUDA_VISIBLE_DEVICES={{.GPU_DEVICE}} -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e PORT=8000 -e HF_TOKEN={{.HF_TOKEN}} -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e TRANSFORMERS_VERBOSITY={{.TRANSFORMERS_VERBOSITY}} -e QWEN_ASR_APP={{.APP_MODE}} -e QWEN_ASR_BACKEND={{.ASR_BACKEND}} -e QWEN_ASR_MODEL={{.ASR_MODEL}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -e QWEN_ASR_ENABLE_ALIGNER={{.ENABLE_ALIGNER}} -e QWEN_ASR_CONCURRENCY={{.ASR_CONCURRENCY}} -e QWEN_ASR_GPU_MEMORY_UTILIZATION={{.GPU_MEMORY_UTILIZATION}} -e QWEN_ASR_MAX_MODEL_LEN={{.MAX_MODEL_LEN}} -e QWEN_ASR_MAX_INFERENCE_BATCH_SIZE={{.MAX_INFERENCE_BATCH_SIZE}} -e QWEN_ASR_MAX_NEW_TOKENS={{.MAX_NEW_TOKENS}} -e QWEN_ASR_GENERATION_CONFIG={{.GENERATION_CONFIG}} -e QWEN_ASR_LOAD_FORMAT={{.LOAD_FORMAT}} -e QWEN_ASR_KV_CACHE_DTYPE={{.KV_CACHE_DTYPE}} -e QWEN_ASR_CALCULATE_KV_SCALES={{.CALCULATE_KV_SCALES}} -v {{.HF_CACHE_VOLUME}}:/app/.cache/huggingface {{.TINY_IMAGE}}
+      - cmd /c docker ps --filter "name={{.CONTAINER}}"
+
+  localrun:
+    desc: Run baked image with local qwen_asr/ bind-mounted for hot-swapping package code
+    cmds:
+      - cmd /c docker rm -f {{.CONTAINER}} >nul 2>&1
+      - cmd /c docker rm -f {{.CONTAINER_LOCAL}} >nul 2>&1
+      - cmd /c docker run -d --name {{.CONTAINER_LOCAL}} -p {{.PORT}}:8000 --gpus all -e CUDA_VISIBLE_DEVICES={{.GPU_DEVICE}} -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e PORT=8000 -e HF_TOKEN={{.HF_TOKEN}} -e HF_HUB_OFFLINE={{.HF_HUB_OFFLINE}} -e TRANSFORMERS_OFFLINE={{.TRANSFORMERS_OFFLINE}} -e TRANSFORMERS_VERBOSITY={{.TRANSFORMERS_VERBOSITY}} -e QWEN_ASR_APP={{.APP_MODE}} -e QWEN_ASR_BACKEND={{.ASR_BACKEND}} -e QWEN_ASR_MODEL={{.ASR_MODEL}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -e QWEN_ASR_ENABLE_ALIGNER={{.ENABLE_ALIGNER}} -e QWEN_ASR_CONCURRENCY={{.ASR_CONCURRENCY}} -e QWEN_ASR_GPU_MEMORY_UTILIZATION={{.GPU_MEMORY_UTILIZATION}} -e QWEN_ASR_MAX_MODEL_LEN={{.MAX_MODEL_LEN}} -e QWEN_ASR_MAX_INFERENCE_BATCH_SIZE={{.MAX_INFERENCE_BATCH_SIZE}} -e QWEN_ASR_MAX_NEW_TOKENS={{.MAX_NEW_TOKENS}} -e QWEN_ASR_GENERATION_CONFIG={{.GENERATION_CONFIG}} -e QWEN_ASR_LOAD_FORMAT={{.LOAD_FORMAT}} -e QWEN_ASR_KV_CACHE_DTYPE={{.KV_CACHE_DTYPE}} -e QWEN_ASR_CALCULATE_KV_SCALES={{.CALCULATE_KV_SCALES}} -v "{{.TASKFILE_DIR}}\qwen_asr:/app/qwen_asr" {{.IMAGE}}
+      - cmd /c docker ps --filter "name={{.CONTAINER_LOCAL}}"
+
+  localrun-tiny:
+    desc: Run tiny image with local qwen_asr/ bind-mounted, online on first use
+    cmds:
+      - cmd /c docker rm -f {{.CONTAINER}} >nul 2>&1
+      - cmd /c docker rm -f {{.CONTAINER_LOCAL}} >nul 2>&1
+      - cmd /c docker volume create {{.HF_CACHE_VOLUME}} >nul
+      - cmd /c docker run -d --name {{.CONTAINER_LOCAL}} -p {{.PORT}}:8000 --gpus all -e CUDA_VISIBLE_DEVICES={{.GPU_DEVICE}} -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e PORT=8000 -e HF_TOKEN={{.HF_TOKEN}} -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e TRANSFORMERS_VERBOSITY={{.TRANSFORMERS_VERBOSITY}} -e QWEN_ASR_APP={{.APP_MODE}} -e QWEN_ASR_BACKEND={{.ASR_BACKEND}} -e QWEN_ASR_MODEL={{.ASR_MODEL}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -e QWEN_ASR_ENABLE_ALIGNER={{.ENABLE_ALIGNER}} -e QWEN_ASR_CONCURRENCY={{.ASR_CONCURRENCY}} -e QWEN_ASR_GPU_MEMORY_UTILIZATION={{.GPU_MEMORY_UTILIZATION}} -e QWEN_ASR_MAX_MODEL_LEN={{.MAX_MODEL_LEN}} -e QWEN_ASR_MAX_INFERENCE_BATCH_SIZE={{.MAX_INFERENCE_BATCH_SIZE}} -e QWEN_ASR_MAX_NEW_TOKENS={{.MAX_NEW_TOKENS}} -e QWEN_ASR_GENERATION_CONFIG={{.GENERATION_CONFIG}} -e QWEN_ASR_LOAD_FORMAT={{.LOAD_FORMAT}} -e QWEN_ASR_KV_CACHE_DTYPE={{.KV_CACHE_DTYPE}} -e QWEN_ASR_CALCULATE_KV_SCALES={{.CALCULATE_KV_SCALES}} -v {{.HF_CACHE_VOLUME}}:/app/.cache/huggingface -v "{{.TASKFILE_DIR}}\qwen_asr:/app/qwen_asr" {{.TINY_IMAGE}}
+      - cmd /c docker ps --filter "name={{.CONTAINER_LOCAL}}"
+
+  imageweb:
+    desc: Open default browser to local Qwen3-ASR-STT UI
+    cmds:
+      - cmd /c start "" "http://localhost:{{.PORT}}"
+
+  imageapi:
+    desc: Download upstream sample audio for manual UI/API smoke checks
+    cmds:
+      - 'cmd /c curl.exe -L -sS "{{.SAMPLE_AUDIO_URL}}" --output {{.TEMP_AUDIO}}'
+      - 'cmd /c if not exist {{.TEMP_AUDIO}} exit /b 1'
+      - 'cmd /c python -c "from pathlib import Path; p=Path(r''{{.TEMP_AUDIO}}''); assert p.exists() and p.stat().st_size > 0, p; print(p)"'
+
+  quality-smoke:
+    desc: Run a small OpenAI-compatible transcription quality smoke test against the running API
+    cmds:
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit 2 --no-append'
+
+  benchmark-transcription:
+    desc: Run transcription quality benchmark and append markdown summaries
+    cmds:
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --language "{{.QUALITY_LANGUAGE}}"'
+
+  deploy-api-06b:
+    desc: Start OpenAI-compatible API with Qwen3-ASR 0.6B and wait for health
+    cmds:
+      - cmd: cmd /c docker rm -f {{.API_CONTAINER}} >nul 2>&1
+        ignore_error: true
+      - cmd /c docker run -d --name {{.API_CONTAINER}} -p {{.PORT}}:8000 --gpus all -e CUDA_VISIBLE_DEVICES={{.GPU_DEVICE}} -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e PORT=8000 -e HF_TOKEN={{.HF_TOKEN}} -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e TRANSFORMERS_VERBOSITY={{.TRANSFORMERS_VERBOSITY}} -e QWEN_ASR_APP=api -e QWEN_ASR_BACKEND={{.ASR_BACKEND}} -e QWEN_ASR_MODEL={{.ASR_06B_MODEL}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -e QWEN_ASR_ENABLE_ALIGNER={{.ENABLE_ALIGNER}} -e QWEN_ASR_CONCURRENCY=2 -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.38 -e QWEN_ASR_MAX_MODEL_LEN=4096 -e QWEN_ASR_MAX_INFERENCE_BATCH_SIZE=2 -e QWEN_ASR_MAX_NEW_TOKENS=1024 -e QWEN_ASR_GENERATION_CONFIG={{.GENERATION_CONFIG}} -e QWEN_ASR_LOAD_FORMAT={{.LOAD_FORMAT}} -e QWEN_ASR_KV_CACHE_DTYPE={{.KV_CACHE_DTYPE}} -e QWEN_ASR_CALCULATE_KV_SCALES={{.CALCULATE_KV_SCALES}} -v {{.HF_CACHE_VOLUME}}:/app/.cache/huggingface -v "{{.TASKFILE_DIR}}\qwen_asr:/app/qwen_asr" {{.IMAGE}}
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/wait_openai_health.ps1 -BaseUrl http://127.0.0.1:{{.PORT}} -ExpectedModel "{{.ASR_06B_MODEL}}" -Container {{.API_CONTAINER}} -TimeoutSeconds {{.HEALTH_TIMEOUT_SECONDS}}
+
+  deploy-api-17b:
+    desc: Start OpenAI-compatible API with Qwen3-ASR 1.7B and wait for health
+    cmds:
+      - cmd: cmd /c docker rm -f {{.API_CONTAINER}} >nul 2>&1
+        ignore_error: true
+      - cmd /c docker run -d --name {{.API_CONTAINER}} -p {{.PORT}}:8000 --gpus all -e CUDA_VISIBLE_DEVICES={{.GPU_DEVICE}} -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e PORT=8000 -e HF_TOKEN={{.HF_TOKEN}} -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e TRANSFORMERS_VERBOSITY={{.TRANSFORMERS_VERBOSITY}} -e QWEN_ASR_APP=api -e QWEN_ASR_BACKEND={{.ASR_BACKEND}} -e QWEN_ASR_MODEL={{.ASR_MODEL}} -e QWEN_ASR_ALIGNER_MODEL={{.ALIGNER_MODEL}} -e QWEN_ASR_ENABLE_ALIGNER={{.ENABLE_ALIGNER}} -e QWEN_ASR_CONCURRENCY=2 -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53 -e QWEN_ASR_MAX_MODEL_LEN=4096 -e QWEN_ASR_MAX_INFERENCE_BATCH_SIZE=2 -e QWEN_ASR_MAX_NEW_TOKENS=1024 -e QWEN_ASR_GENERATION_CONFIG={{.GENERATION_CONFIG}} -e QWEN_ASR_LOAD_FORMAT={{.LOAD_FORMAT}} -e QWEN_ASR_KV_CACHE_DTYPE={{.KV_CACHE_DTYPE}} -e QWEN_ASR_CALCULATE_KV_SCALES={{.CALCULATE_KV_SCALES}} -v {{.HF_CACHE_VOLUME}}:/app/.cache/huggingface -v "{{.TASKFILE_DIR}}\qwen_asr:/app/qwen_asr" {{.IMAGE}}
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/wait_openai_health.ps1 -BaseUrl http://127.0.0.1:{{.PORT}} -ExpectedModel "{{.ASR_MODEL}}" -Container {{.API_CONTAINER}} -TimeoutSeconds {{.HEALTH_TIMEOUT_SECONDS}}
+
+  benchmark-transcription-06b:
+    desc: Deploy 0.6B API, wait for health, then run official transcription benchmark
+    cmds:
+      - task deploy-api-06b
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url http://127.0.0.1:8000 --model qwen3-asr --model-label "Qwen/Qwen3-ASR-0.6B" --limit 0 --prewarm 10 --request-timeout 120 --language ""'
+
+  benchmark-transcription-17b:
+    desc: Deploy 1.7B API, wait for health, then run official transcription benchmark
+    cmds:
+      - task deploy-api-17b
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url http://127.0.0.1:8000 --model qwen3-asr --model-label "Qwen/Qwen3-ASR-1.7B" --limit 0 --prewarm 10 --request-timeout 120 --language ""'
+
+  imagestop:
+    desc: Stop running Qwen3-ASR-STT containers
+    cmds:
+      - cmd: cmd /c docker stop {{.CONTAINER}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker stop {{.CONTAINER_LOCAL}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker stop {{.API_CONTAINER}} >nul 2>&1
+        ignore_error: true
+
+  logs:
+    desc: Show logs from active Qwen3-ASR-STT container
+    cmds:
+      - cmd /c docker logs --tail 200 {{.API_CONTAINER}} 2>nul || docker logs --tail 200 {{.CONTAINER_LOCAL}} 2>nul || docker logs --tail 200 {{.CONTAINER}}
+
+  nuke:
+    desc: Remove Qwen3-ASR-STT local containers, images, and Hugging Face cache volume
+    cmds:
+      - cmd: cmd /c docker rm -f {{.CONTAINER}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker rm -f {{.CONTAINER_LOCAL}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker rm -f {{.API_CONTAINER}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker rmi -f {{.IMAGE}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker rmi -f {{.TINY_IMAGE}} >nul 2>&1
+        ignore_error: true
+      - cmd: cmd /c docker volume rm -f {{.HF_CACHE_VOLUME}} >nul 2>&1
+        ignore_error: true

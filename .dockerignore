@@ -1,0 +1,32 @@
+# Git and local metadata
+.git
+.gitignore
+.github
+.idea
+.ai
+AGENTS.md
+
+# Python cache/artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Local envs and temp
+.venv/
+venv/
+env/
+*.log
+downloads/
+pretrained_models/
+
+# Large/reference-only assets
+assets/*.pdf
+testbench/results/

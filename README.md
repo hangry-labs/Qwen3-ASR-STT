@@ -31,14 +31,10 @@ We release **Qwen3-ASR**, a family that includes two powerful all-in-one speech 
   - [Python Package Usage](#python-package-usage)
     - [Quick Inference](#quick-inference)
     - [vLLM Backend](#vllm-backend)
-    - [Streaming Inference](#streaming-inference)
     - [ForcedAligner Usage](#forcedaligner-usage)
   - [DashScope API Usage](#dashscope-api-usage)
-- [Launch Local Web UI Demo](#launch-local-web-ui-demo)
-  - [Gradio Demo](#gradio-demo)
-  - [Streaming Demo](#streaming-demo)
+- [Docker API and UI](#docker-api-and-ui)
 - [Deployment with vLLM](#deployment-with-vllm)
-- [Fine Tuning](#fine-tuning)
 - [Docker](#docker)
 - [Evaluation](#evaluation)
 - [Citation](#citation)
@@ -52,7 +48,7 @@ We release **Qwen3-ASR**, a family that includes two powerful all-in-one speech 
     <img src="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/qwen3_asr_introduction.png" width="90%"/>
 <p>
 
-The Qwen3-ASR family includes Qwen3-ASR-1.7B and Qwen3-ASR-0.6B, which support language identification and ASR for 52 languages and dialects. Both leverage large-scale speech training data and the strong audio understanding capability of their foundation model, Qwen3-Omni. Experiments show that the 1.7B version achieves state-of-the-art performance among open-source ASR models and is competitive with the strongest proprietary commercial APIs. Here are the main features:
+The Qwen3-ASR family includes Qwen3-ASR-1.7B and Qwen3-ASR-0.6B, which support language identification and ASR for 52 languages and dialects. Both build on the strong audio understanding capability of their foundation model, Qwen3-Omni. Experiments show that the 1.7B version achieves state-of-the-art performance among open-source ASR models and is competitive with the strongest proprietary commercial APIs. Here are the main features:
 
 * **All-in-one**: Qwen3-ASR-1.7B and Qwen3-ASR-0.6B support language identification and speech recognition for 30 languages and 22 Chinese dialects, so as to English accents from multiple countries and regions.
 
@@ -240,51 +236,7 @@ if __name__ == '__main__':
         print(r.language, r.text, r.time_stamps[0])
 ```
 
-For more detailed usage examples, please refer to the [example code](https://github.com/QwenLM/Qwen3-ASR/blob/main/examples/example_qwen3_asr_vllm.py) for the vLLM backend. In addition, you can start a vLLM server via the `qwen-asr-serve` command, which is a wrapper around `vllm serve`. You can pass any arguments supported by `vllm serve`, for example:
-
-```bash
-qwen-asr-serve Qwen/Qwen3-ASR-1.7B --gpu-memory-utilization 0.8 --host 0.0.0.0 --port 8000
-```
-
-And send requests to the server via:
-
-```python
-import requests
-
-url = "http://localhost:8000/v1/chat/completions"
-headers = {"Content-Type": "application/json"}
-
-data = {
-    "messages": [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "audio_url",
-                    "audio_url": {
-                        "url": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/asr_en.wav"
-                    },
-                }
-            ],
-        }
-    ]
-}
-
-response = requests.post(url, headers=headers, json=data, timeout=300)
-response.raise_for_status()
-content = response.json()['choices'][0]['message']['content']
-print(content)
-
-# parse ASR output if you want
-from qwen_asr import parse_asr_output
-language, text = parse_asr_output(content)
-print(language)
-print(text)
-```
-
-#### Streaming Inference
-
-Qwen3-ASR fully supports streaming inference. Currently, streaming inference is only available with the vLLM backend. Note that streaming inference does not support batch inference or returning timestamps. Please refer to the [example code](https://github.com/QwenLM/Qwen3-ASR/blob/main/examples/example_qwen3_asr_vllm_streaming.py) for details. You can also launch a streaming web demo through the [guide](#streaming-demo) to experience Qwen3-ASR’s streaming transcription capabilities. 
+For Hangry Labs deployments, use the Docker API or UI surfaces instead of package CLI commands.
 
 #### ForcedAligner Usage
 
@@ -323,127 +275,25 @@ To further explore Qwen3-ASR, we encourage you to try our DashScope API for a fa
 | FileTrans API for Qwen3-ASR. | [https://help.aliyun.com/zh/model-studio/qwen-speech-recognition](https://help.aliyun.com/zh/model-studio/qwen-speech-recognition) | [https://www.alibabacloud.com/help/en/model-studio/qwen-speech-recognition](https://www.alibabacloud.com/help/en/model-studio/qwen-speech-recognition) |
 
 
-## Launch Local Web UI Demo
+## Docker API and UI
 
-### Gradio Demo
+This repository is packaged for Docker-first inference. End users interact with the container through the OpenAI-compatible transcription API or the bundled web UI, not through Python package CLI commands.
 
-To launch the Qwen3-ASR web UI gradio demo, install the `qwen-asr` package and run `qwen-asr-demo`. Use the command below for help:
-
-```bash
-qwen-asr-demo --help
-```
-
-To launch the demo, you can use the following commands:
+Useful local tasks:
 
 ```bash
-# Transformers backend
-qwen-asr-demo \
-  --asr-checkpoint Qwen/Qwen3-ASR-1.7B \
-  --backend transformers \
-  --cuda-visible-devices 0 \
-  --ip 0.0.0.0 --port 8000
-
-# Transformers backend + Forced Aligner (enable timestamps)
-qwen-asr-demo \
-  --asr-checkpoint Qwen/Qwen3-ASR-1.7B \
-  --aligner-checkpoint Qwen/Qwen3-ForcedAligner-0.6B \
-  --backend transformers \
-  --cuda-visible-devices 0 \
-  --backend-kwargs '{"device_map":"cuda:0","dtype":"bfloat16","max_inference_batch_size":8,"max_new_tokens":256}' \
-  --aligner-kwargs '{"device_map":"cuda:0","dtype":"bfloat16"}' \
-  --ip 0.0.0.0 --port 8000
-
-# vLLM backend + Forced Aligner (enable timestamps)
-qwen-asr-demo \
-  --asr-checkpoint Qwen/Qwen3-ASR-1.7B \
-  --aligner-checkpoint Qwen/Qwen3-ForcedAligner-0.6B \
-  --backend vllm \
-  --cuda-visible-devices 0 \
-  --backend-kwargs '{"gpu_memory_utilization":0.7,"max_inference_batch_size":8,"max_new_tokens":2048}' \
-  --aligner-kwargs '{"device_map":"cuda:0","dtype":"bfloat16"}' \
-  --ip 0.0.0.0 --port 8000
+task deploy-api-17b
+task deploy-api-06b
+task benchmark-transcription-17b
+task benchmark-transcription-06b
 ```
 
-Then open `http://<your-ip>:8000`, or access it via port forwarding in tools like VS Code.
+The API exposes:
 
-#### Backend Notes
-
-This demo supports two backends: transformers and vLLM. All backend-specific initialization parameters should be passed via `--backend-kwargs` as a JSON dict. If not provided, the demo will use sensible defaults.
-
-```bash
-# Example: override transformers init args with flash attention
---backend-kwargs '{"device_map":"cuda:0","dtype":"bfloat16","attn_implementation":"flash_attention_2"}'
-
-# Example: override vLLM init args with 65% GPU memory
---backend-kwargs '{"gpu_memory_utilization":0.65}'
-```
-
-#### CUDA Device Notes
-
-Because vLLM does not follow `cuda:0` style device selection, this demo selects GPUs by setting `CUDA_VISIBLE_DEVICES` via `--cuda-visible-devices`.
-
-```bash
-# Use GPU 0
---cuda-visible-devices 0
-
-# Use GPU 1
---cuda-visible-devices 1
-```
-
-#### Timestamps Notes
-
-Timestamps are only available when `--aligner-checkpoint` is provided. If you launch the demo without a forced aligner, the timestamps UI will be hidden automatically.
-
-```bash
-# No forced aligner
-qwen-asr-demo --asr-checkpoint Qwen/Qwen3-ASR-1.7B
-
-# With forced aligner
-qwen-asr-demo \
-  --asr-checkpoint Qwen/Qwen3-ASR-1.7B \
-  --aligner-checkpoint Qwen/Qwen3-ForcedAligner-0.6B
-```
-
-#### HTTPS Notes
-
-To avoid browser microphone permission issues after deploying the server, it is recommended/required to run the gradio service over HTTPS (especially when accessed remotely or behind modern browsers/gateways). Use `--ssl-certfile` and `--ssl-keyfile` to enable HTTPS. First, generate a private key and a self-signed certificate (valid for 365 days):
-
-```bash
-openssl req -x509 -newkey rsa:2048 \
-  -keyout key.pem -out cert.pem \
-  -days 365 -nodes \
-  -subj "/CN=localhost"
-```
-
-Then run the demo with HTTPS:
-
-```bash
-qwen-asr-demo \
-  --asr-checkpoint Qwen/Qwen3-ASR-1.7B \
-  --backend transformers \
-  --cuda-visible-devices 0 \
-  --ip 0.0.0.0 --port 8000 \
-  --ssl-certfile cert.pem \
-  --ssl-keyfile key.pem \
-  --no-ssl-verify
-```
-
-Then open `https://<your-ip>:8000` to use it. If your browser shows a warning, that’s expected for self-signed certificates. For production, use a real certificate.
-
-### Streaming Demo
-
-To experience Qwen3-ASR’s streaming transcription capability in a web UI, we provide a minimal Flask-based streaming demo. The demo captures microphone audio in the browser, resamples it to 16,000 Hz, and continuously pushes PCM chunks to the model. Run the demo with the following command:
-
-```bash
-qwen-asr-demo-streaming \
-  --asr-model-path Qwen/Qwen3-ASR-1.7B \
-  --gpu-memory-utilization 0.9 \
-  --host 0.0.0.0 \
-  --port 8000
-```
-
-Then open `http://<your-ip>:8000`, or access it via port forwarding in tools like VS Code.
-
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/audio/transcriptions`
+- `GET /v1/audio/supported_languages`
 ## Deployment with vLLM
 
 vLLM officially provides day-0 model support for Qwen3-ASR for efficient inference. 
@@ -568,11 +418,6 @@ sampling_params = SamplingParams(temperature=0.01, max_tokens=256)
 outputs = llm.chat(conversation, sampling_params=sampling_params)
 print(outputs[0].outputs[0].text)
 ```
-
-
-## Fine Tuning
-
-Please refer to [Qwen3-ASR-Finetuning](finetuning/) for detailed instructions on fine-tuning Qwen3-ASR.
 
 
 ## Docker

@@ -18,7 +18,9 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-.idea/
 .vscode/
 venv/
 env/
+
+.idea
+testbench/results/*.json

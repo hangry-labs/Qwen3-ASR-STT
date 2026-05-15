@@ -16,10 +16,16 @@
 """
 qwen_asr: Qwen3-ASR package.
 """
+from importlib.metadata import PackageNotFoundError, version
 
 from .inference.qwen3_asr import Qwen3ASRModel
 from .inference.qwen3_forced_aligner import Qwen3ForcedAligner
 
 from .inference.utils import parse_asr_output
 
-__all__ = ["__version__"]
+try:
+    __version__ = version("qwen-asr")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
+
+__all__ = ["Qwen3ASRModel", "Qwen3ForcedAligner", "parse_asr_output", "__version__"]

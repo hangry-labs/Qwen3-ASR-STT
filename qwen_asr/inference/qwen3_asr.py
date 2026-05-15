@@ -269,7 +269,10 @@ class Qwen3ASRModel:
         llm = vLLM(model=model, **kwargs)
 
         processor = Qwen3ASRProcessor.from_pretrained(model, fix_mistral_regex=True)
-        sampling_params = SamplingParams(**({"temperature": 0.0, "max_tokens": max_new_tokens}))
+        # ASR/translation must remain deterministic: preserve the upstream
+        # explicit zero-temperature sampling instead of falling back to model
+        # generation config defaults.
+        sampling_params = SamplingParams(temperature=0.0, max_tokens=max_new_tokens)
 
         forced_aligner_model = None
         if forced_aligner is not None:
