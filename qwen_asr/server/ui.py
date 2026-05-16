@@ -431,6 +431,17 @@ def refresh_api_status(base_url: str) -> tuple[str, str]:
     return json.dumps(payload, ensure_ascii=False, indent=2), gpu_monitor_html()
 
 
+def switch_ui_view(view: str) -> tuple[Any, Any, Any, Any, Any]:
+    selected = view or "Transcribe"
+    return (
+        gr.update(visible=selected == "Transcribe"),
+        gr.update(visible=selected == "Transcribe"),
+        gr.update(visible=selected == "Stream"),
+        gr.update(visible=selected == "API"),
+        gr.update(visible=selected == "System"),
+    )
+
+
 def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blocks:
     app_css = brand_css(BRAND_ASSET_BASE) + GPU_CSS
     header = brand_header_html(
@@ -458,62 +469,73 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                 model = gr.Textbox(value="qwen3-asr", label="Model")
                 language = gr.Dropdown(choices=LANGUAGE_CHOICES, value="Auto", label="Language")
                 prompt = gr.Textbox(label="Prompt / context", lines=3, placeholder="Optional words, spelling, or context to help recognition.")
-                response_format = gr.Dropdown(choices=RESPONSE_FORMATS, value="json", label="Response format")
-                timestamp_granularities = gr.CheckboxGroup(
-                    choices=TIMESTAMP_GRANULARITIES,
-                    value=[],
-                    label="Timestamp granularities",
-                    info="Requires the forced aligner to be enabled in the container.",
-                )
+                with gr.Group(visible=True) as transcribe_options:
+                    response_format = gr.Dropdown(choices=RESPONSE_FORMATS, value="json", label="Response format")
+                    timestamp_granularities = gr.CheckboxGroup(
+                        choices=TIMESTAMP_GRANULARITIES,
+                        value=[],
+                        label="Timestamp granularities",
+                        info="Requires the forced aligner to be enabled in the container.",
+                    )
                 temperature = gr.Number(value=0, label="Temperature", interactive=False, info="Deterministic transcription is enforced.")
 
             with gr.Column(scale=2):
-                with gr.Tabs():
-                    with gr.Tab("Transcribe"):
-                        audio_in = gr.Audio(
-                            label="Audio input",
-                            sources=["upload", "microphone"],
-                            type="filepath",
-                            format="mp3",
-                        )
-                        transcribe_btn = gr.Button("Transcribe", variant="primary")
-                        transcript = gr.Textbox(label="Transcript", lines=8)
-                        details = gr.Textbox(label="Response details", lines=10)
-                        status = gr.Textbox(label="Status", lines=1)
-                        if examples:
-                            gr.Examples(examples=examples, inputs=[audio_in, language], label="Example files")
+                view_selector = gr.Radio(
+                    choices=["Transcribe", "Stream", "API", "System"],
+                    value="Transcribe",
+                    label="View",
+                )
+                with gr.Group(visible=True) as transcribe_view:
+                    audio_in = gr.Audio(
+                        label="Audio input",
+                        sources=["upload", "microphone"],
+                        type="filepath",
+                        format="mp3",
+                    )
+                    transcribe_btn = gr.Button("Transcribe", variant="primary")
+                    transcript = gr.Textbox(label="Transcript", lines=8)
+                    details = gr.Textbox(label="Response details", lines=10)
+                    status = gr.Textbox(label="Status", lines=1)
+                    if examples:
+                        gr.Examples(examples=examples, inputs=[audio_in, language], label="Example files")
 
-                    with gr.Tab("Stream"):
-                        stream_audio = gr.Audio(
-                            label="Audio input",
-                            sources=["upload", "microphone"],
-                            type="filepath",
-                            format="mp3",
-                        )
-                        stream_btn = gr.Button("Stream transcription", variant="primary")
-                        stream_text = gr.Textbox(label="Streaming transcript", lines=8)
-                        stream_status = gr.Textbox(label="Stream status", lines=1)
-                        realtime_session = gr.State("")
-                        realtime_audio = gr.Audio(
-                            label="Realtime microphone",
-                            sources=["microphone"],
-                            type="numpy",
-                            streaming=True,
-                        )
-                        with gr.Row():
-                            realtime_finish = gr.Button("Finalize realtime", variant="secondary")
-                            realtime_reset = gr.Button("Reset realtime", variant="secondary")
-                        realtime_text = gr.Textbox(label="Realtime transcript", lines=8)
-                        realtime_status = gr.Textbox(label="Realtime status", lines=1)
+                with gr.Group(visible=False) as stream_view:
+                    stream_audio = gr.Audio(
+                        label="Audio input",
+                        sources=["upload", "microphone"],
+                        type="filepath",
+                        format="mp3",
+                    )
+                    stream_btn = gr.Button("Stream transcription", variant="primary")
+                    stream_text = gr.Textbox(label="Streaming transcript", lines=8)
+                    stream_status = gr.Textbox(label="Stream status", lines=1)
+                    realtime_session = gr.State("")
+                    realtime_audio = gr.Audio(
+                        label="Realtime microphone",
+                        sources=["microphone"],
+                        type="numpy",
+                        streaming=True,
+                    )
+                    with gr.Row():
+                        realtime_finish = gr.Button("Finalize realtime", variant="secondary")
+                        realtime_reset = gr.Button("Reset realtime", variant="secondary")
+                    realtime_text = gr.Textbox(label="Realtime transcript", lines=8)
+                    realtime_status = gr.Textbox(label="Realtime status", lines=1)
 
-                    with gr.Tab("API"):
-                        refresh_btn = gr.Button("Refresh API status")
-                        api_status = gr.Code(label="OpenAI API status", language="json", value="{}")
+                with gr.Group(visible=False) as api_view:
+                    refresh_btn = gr.Button("Refresh API status")
+                    api_status = gr.Code(label="OpenAI API status", language="json", value="{}")
 
-                    with gr.Tab("System"):
-                        gpu_html = gr.HTML(gpu_monitor_html())
-                        gpu_refresh = gr.Button("Refresh GPU monitor")
+                with gr.Group(visible=False) as system_view:
+                    gpu_html = gr.HTML(gpu_monitor_html())
+                    gpu_refresh = gr.Button("Refresh GPU monitor")
 
+        view_selector.change(
+            fn=switch_ui_view,
+            inputs=view_selector,
+            outputs=[transcribe_options, transcribe_view, stream_view, api_view, system_view],
+            queue=False,
+        )
         transcribe_btn.click(
             fn=transcribe_openai,
             inputs=[audio_in, model, language, response_format, prompt, timestamp_granularities, api_base_state],

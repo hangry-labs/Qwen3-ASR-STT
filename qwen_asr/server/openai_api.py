@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_audios, normalize_language_name, validate_language
@@ -288,14 +288,13 @@ def _sse_event(event_type: str, payload: dict[str, Any]) -> str:
     return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _stream_response(item: Any) -> StreamingResponse:
-    async def events():
-        if item.text:
-            yield _sse_event("transcript.text.delta", {"delta": item.text})
-        yield _sse_event("transcript.text.done", {"text": item.text})
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(events(), media_type="text/event-stream")
+def _stream_response(item: Any) -> PlainTextResponse:
+    body = ""
+    if item.text:
+        body += _sse_event("transcript.text.delta", {"delta": item.text})
+    body += _sse_event("transcript.text.done", {"text": item.text})
+    body += "data: [DONE]\n\n"
+    return PlainTextResponse(body, media_type="text/event-stream")
 
 
 @dataclass
