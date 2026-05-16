@@ -32,6 +32,7 @@ class FakeASR:
     def __init__(self, *, forced_aligner: object | None = None):
         self.forced_aligner = forced_aligner
         self.calls: list[dict[str, Any]] = []
+        self.streaming_calls: list[Any] = []
 
     def transcribe(self, **kwargs):
         self.calls.append(kwargs)
@@ -44,6 +45,23 @@ class FakeASR:
                 ]
             )
         return [FakeResult(text="hello world", language=kwargs.get("language") or "English", time_stamps=time_stamps)]
+
+    def init_streaming_state(self, **kwargs):
+        self.calls.append({"streaming_init": kwargs})
+        return type("FakeStreamingState", (), {"text": "", "language": "", "chunk_id": 0})()
+
+    def streaming_transcribe(self, pcm16k, state):
+        self.streaming_calls.append(pcm16k)
+        state.chunk_id += 1
+        state.language = "English"
+        state.text = f"streamed {state.chunk_id}"
+        return state
+
+    def finish_streaming_transcribe(self, state):
+        state.chunk_id += 1
+        state.language = "English"
+        state.text = "streamed final"
+        return state
 
 
 def _client(asr: FakeASR | None = None) -> TestClient:
@@ -170,6 +188,42 @@ class OpenAIApiTests(unittest.TestCase):
         response = _client().post("/v1/audio/translations", files=_files(), data={"model": "qwen3-asr"})
         self.assertEqual(response.status_code, 501)
         self.assertIn("error", response.json())
+
+    def test_realtime_transcription_session_append_and_finish(self):
+        asr = FakeASR()
+        client = _client(asr)
+
+        created = client.post(
+            "/v1/realtime/transcriptions/sessions",
+            json={"model": "qwen3-asr", "language": "en", "temperature": 0, "chunk_size_sec": 2.0},
+        )
+        self.assertEqual(created.status_code, 200)
+        session_id = created.json()["id"]
+        self.assertTrue(session_id.startswith("rt_"))
+
+        import io
+
+        import numpy as np
+        import soundfile as sf
+
+        buffer = io.BytesIO()
+        sf.write(buffer, np.zeros((16000,), dtype=np.float32), 16000, format="WAV")
+
+        appended = client.post(
+            f"/v1/realtime/transcriptions/sessions/{session_id}/audio",
+            files={"file": ("chunk.wav", buffer.getvalue(), "audio/wav")},
+        )
+        self.assertEqual(appended.status_code, 200)
+        self.assertEqual(appended.json()["text"], "streamed 1")
+        self.assertEqual(appended.json()["final"], False)
+
+        finished = client.post(f"/v1/realtime/transcriptions/sessions/{session_id}/finish")
+        self.assertEqual(finished.status_code, 200)
+        self.assertEqual(finished.json()["text"], "streamed final")
+        self.assertEqual(finished.json()["final"], True)
+
+        missing = client.post(f"/v1/realtime/transcriptions/sessions/{session_id}/finish")
+        self.assertEqual(missing.status_code, 404)
 
 
 if __name__ == "__main__":

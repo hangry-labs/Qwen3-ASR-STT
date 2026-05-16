@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from qwen_asr.server.ui import _audio_path_from_gradio, _request_data
+from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
+from qwen_asr.server.ui import _audio_path_from_gradio, _load_examples, _request_data
 
 
 class UiCallbackInputTests(unittest.TestCase):
@@ -26,6 +27,29 @@ class UiCallbackInputTests(unittest.TestCase):
             timestamp_granularities=[],
         )
         self.assertEqual(data["temperature"], "0")
+
+    def test_examples_include_one_fixture_per_supported_language(self):
+        examples = _load_examples()
+        example_languages = [language for _path, language in examples]
+        self.assertEqual(example_languages, SUPPORTED_LANGUAGES)
+
+    def test_realtime_audio_chunk_is_serialized_as_wav(self):
+        import numpy as np
+        import soundfile as sf
+
+        from qwen_asr.server.ui import _wav_bytes_from_audio_chunk
+
+        payload = _wav_bytes_from_audio_chunk((16000, np.zeros((8000,), dtype=np.float32)))
+        self.assertIsNotNone(payload)
+        audio_bytes, duration = payload
+        self.assertAlmostEqual(duration, 0.5, places=2)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav") as audio_file:
+            audio_file.write(audio_bytes)
+            audio_file.flush()
+            audio, sample_rate = sf.read(audio_file.name)
+        self.assertEqual(sample_rate, 16000)
+        self.assertEqual(audio.shape[0], 8000)
 
 
 class UiCallbackSmokeTests(unittest.TestCase):

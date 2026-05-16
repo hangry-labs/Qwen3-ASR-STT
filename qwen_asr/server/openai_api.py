@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 import tempfile
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable
 
@@ -14,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_language_name, validate_language
+from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_audios, normalize_language_name, validate_language
 from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
 
 if TYPE_CHECKING:
@@ -296,6 +298,28 @@ def _stream_response(item: Any) -> StreamingResponse:
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
+@dataclass
+class _RealtimeSession:
+    state: Any
+    lock: asyncio.Lock
+    model: str
+    language: str | None
+    prompt: str
+    chunk_size_sec: float
+
+
+def _realtime_payload(session_id: str, state: Any, *, final: bool) -> dict[str, Any]:
+    return {
+        "id": session_id,
+        "object": "realtime.transcription",
+        "type": "transcript.text.done" if final else "transcript.text.delta",
+        "text": getattr(state, "text", ""),
+        "language": getattr(state, "language", ""),
+        "chunk_id": int(getattr(state, "chunk_id", 0)),
+        "final": final,
+    }
+
+
 def _coerce_special_types(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     coerced = dict(kwargs)
     dtype = coerced.get("dtype")
@@ -317,6 +341,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Qwen3-ASR OpenAI-compatible API")
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+    realtime_sessions: dict[str, _RealtimeSession] = {}
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
@@ -441,6 +466,116 @@ def create_app(
                 "Qwen3-ASR translation mode needs a dedicated compatibility pass before it is advertised."
             ),
         )
+
+    @app.post("/v1/realtime/transcriptions/sessions")
+    async def create_realtime_session(request: Request) -> Dict[str, Any]:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+
+        model = str(payload.get("model") or "")
+        _validate_model(model, model_name)
+        _validate_temperature(str(payload.get("temperature", "")))
+
+        forced_language = None
+        language = str(payload.get("language") or "")
+        if language.strip():
+            try:
+                forced_language = _normalize_openai_language(language)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        chunk_size_sec = float(payload.get("chunk_size_sec", 2.0))
+        unfixed_chunk_num = int(payload.get("unfixed_chunk_num", 2))
+        unfixed_token_num = int(payload.get("unfixed_token_num", 5))
+        prompt = str(payload.get("prompt") or "")
+
+        if not hasattr(asr, "init_streaming_state"):
+            raise HTTPException(status_code=501, detail="Realtime streaming is not available for this backend")
+
+        try:
+            state = asr.init_streaming_state(
+                context=prompt,
+                language=forced_language,
+                unfixed_chunk_num=unfixed_chunk_num,
+                unfixed_token_num=unfixed_token_num,
+                chunk_size_sec=chunk_size_sec,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        session_id = f"rt_{uuid.uuid4().hex}"
+        realtime_sessions[session_id] = _RealtimeSession(
+            state=state,
+            lock=asyncio.Lock(),
+            model=model_name if model in MODEL_ALIASES else model_name,
+            language=forced_language,
+            prompt=prompt,
+            chunk_size_sec=chunk_size_sec,
+        )
+        return {
+            "id": session_id,
+            "object": "realtime.transcription_session",
+            "model": model_name,
+            "language": forced_language,
+            "chunk_size_sec": chunk_size_sec,
+        }
+
+    @app.post("/v1/realtime/transcriptions/sessions/{session_id}/audio")
+    async def append_realtime_audio(session_id: str, request: Request) -> Dict[str, Any]:
+        session = realtime_sessions.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Unknown realtime transcription session: {session_id}")
+
+        form = await request.form()
+        upload = form.get("file")
+        if not isinstance(upload, (UploadFile, StarletteUploadFile)):
+            raise HTTPException(status_code=400, detail="Missing required multipart file field: file")
+
+        suffix = Path(upload.filename or "audio.wav").suffix or ".wav"
+        with optional_timer("read realtime audio chunk", trace_requests):
+            payload = await upload.read()
+            await upload.close()
+        if not payload:
+            return _realtime_payload(session_id, session.state, final=False)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(payload)
+            tmp_path = tmp.name
+        try:
+            chunk = normalize_audios(tmp_path)[0]
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        async with session.lock:
+            async with semaphore:
+                try:
+                    await asyncio.to_thread(asr.streaming_transcribe, chunk, session.state)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return _realtime_payload(session_id, session.state, final=False)
+
+    @app.post("/v1/realtime/transcriptions/sessions/{session_id}/finish")
+    async def finish_realtime_session(session_id: str) -> Dict[str, Any]:
+        session = realtime_sessions.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Unknown realtime transcription session: {session_id}")
+
+        async with session.lock:
+            async with semaphore:
+                try:
+                    await asyncio.to_thread(asr.finish_streaming_transcribe, session.state)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+        realtime_sessions.pop(session_id, None)
+        return _realtime_payload(session_id, session.state, final=True)
+
+    @app.delete("/v1/realtime/transcriptions/sessions/{session_id}")
+    async def delete_realtime_session(session_id: str) -> Dict[str, Any]:
+        removed = realtime_sessions.pop(session_id, None)
+        return {"id": session_id, "deleted": removed is not None}
 
     @app.get("/v1/audio/supported_languages")
     def supported_languages() -> Dict[str, Any]:

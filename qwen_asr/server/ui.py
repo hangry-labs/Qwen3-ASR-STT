@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import io
 import json
 import mimetypes
 import os
@@ -11,6 +12,8 @@ from typing import Any, Dict, Iterable
 
 import gradio as gr
 import httpx
+import numpy as np
+import soundfile as sf
 import torch
 import uvicorn
 from fastapi.staticfiles import StaticFiles
@@ -169,7 +172,7 @@ def _get_banner_runtime_html(model_name: str, backend: str) -> str:
     return f"v{version} | {backend_label}<br>{model}<br>{hardware}"
 
 
-def _load_examples(limit: int = 12) -> list[list[Any]]:
+def _load_examples() -> list[list[Any]]:
     if not MANIFEST_PATH.exists():
         return []
     try:
@@ -177,21 +180,17 @@ def _load_examples(limit: int = 12) -> list[list[Any]]:
     except (OSError, json.JSONDecodeError):
         return []
 
-    examples: list[list[Any]] = []
-    seen_languages: set[str] = set()
+    by_language: dict[str, str] = {}
     for case in payload.get("cases", []):
         language = str(case.get("language", "") or "")
         audio_rel = str(case.get("audio", "") or "")
-        if not language or not audio_rel or language in seen_languages:
+        if not language or not audio_rel or language in by_language:
             continue
         audio_path = TESTBENCH_DIR / audio_rel
         if not audio_path.exists():
             continue
-        examples.append([str(audio_path), language])
-        seen_languages.add(language)
-        if len(examples) >= limit:
-            break
-    return examples
+        by_language[language] = str(audio_path)
+    return [[by_language[language], language] for language in SUPPORTED_LANGUAGES if language in by_language]
 
 
 def _api_url(base_url: str, path: str) -> str:
@@ -334,6 +333,91 @@ def stream_openai(
                         yield transcript, f"Done | {time.perf_counter() - start:.3f}s"
 
 
+def _wav_bytes_from_audio_chunk(audio_chunk: Any) -> tuple[bytes, float] | None:
+    if audio_chunk is None:
+        return None
+    if not isinstance(audio_chunk, tuple) or len(audio_chunk) != 2:
+        return None
+
+    sample_rate, samples = audio_chunk
+    sample_rate = int(sample_rate)
+    audio = np.asarray(samples)
+    if audio.size == 0:
+        return None
+    if audio.ndim > 2:
+        audio = audio.reshape(-1)
+    if audio.ndim == 2 and audio.shape[0] in {1, 2} and audio.shape[1] > audio.shape[0]:
+        audio = audio.T
+
+    duration = float(audio.shape[0]) / float(sample_rate) if sample_rate > 0 else 0.0
+    buffer = io.BytesIO()
+    sf.write(buffer, audio, sample_rate, format="WAV")
+    return buffer.getvalue(), duration
+
+
+def realtime_stream_openai(
+    audio_chunk: Any,
+    session_id: str | None,
+    model: str,
+    language: str,
+    prompt: str,
+    base_url: str,
+) -> tuple[str, str, str]:
+    wav_payload = _wav_bytes_from_audio_chunk(audio_chunk)
+    if wav_payload is None:
+        return "", "Listening.", session_id or ""
+
+    audio_bytes, duration = wav_payload
+    with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+        if not session_id:
+            data: dict[str, Any] = {
+                "model": model,
+                "prompt": prompt or "",
+                "temperature": 0,
+                "chunk_size_sec": 2.0,
+                "unfixed_chunk_num": 2,
+                "unfixed_token_num": 5,
+            }
+            if language and language != "Auto":
+                data["language"] = language
+            response = client.post(_api_url(base_url, "/v1/realtime/transcriptions/sessions"), json=data)
+            if response.status_code >= 400:
+                return "", response.text, ""
+            session_id = str(response.json()["id"])
+
+        files = {"file": ("chunk.wav", audio_bytes, "audio/wav")}
+        response = client.post(
+            _api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/audio"),
+            files=files,
+        )
+    if response.status_code >= 400:
+        return "", response.text, session_id or ""
+    payload = response.json()
+    text = str(payload.get("text", ""))
+    chunk_id = int(payload.get("chunk_id", 0))
+    status = f"Realtime | session {session_id} | chunks {chunk_id} | last audio {duration:.2f}s"
+    return text, status, session_id or ""
+
+
+def finish_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, str, str]:
+    if not session_id:
+        return "", "No active realtime session.", ""
+    with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+        response = client.post(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/finish"))
+    if response.status_code >= 400:
+        return "", response.text, session_id
+    payload = response.json()
+    text = str(payload.get("text", ""))
+    return text, f"Finalized | session {session_id} | chunks {payload.get('chunk_id', 0)}", ""
+
+
+def reset_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, str, str]:
+    if session_id:
+        with httpx.Client(timeout=10.0) as client:
+            client.delete(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}"))
+    return "", "Realtime session reset.", ""
+
+
 def refresh_api_status(base_url: str) -> tuple[str, str]:
     with httpx.Client(timeout=10.0) as client:
         health = client.get(_api_url(base_url, "/health"))
@@ -351,7 +435,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
     app_css = brand_css(BRAND_ASSET_BASE) + GPU_CSS
     header = brand_header_html(
         product_name="Qwen3-ASR-STT",
-        description="Local speech-to-text testing for Qwen3-ASR with Docker-first OpenAI-compatible transcription APIs.",
+        description="Offline Qwen3-ASR speech recognition packaged for deterministic local transcription through OpenAI-compatible APIs.",
         links=[
             ("Examples", "https://github.com/Hangry-Labs/Qwen3-ASR-STT/tree/main/testbench"),
             ("GitHub", "https://github.com/Hangry-Labs/Qwen3-ASR-STT"),
@@ -390,6 +474,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                             label="Audio input",
                             sources=["upload", "microphone"],
                             type="filepath",
+                            format="mp3",
                         )
                         transcribe_btn = gr.Button("Transcribe", variant="primary")
                         transcript = gr.Textbox(label="Transcript", lines=8)
@@ -403,10 +488,23 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                             label="Audio input",
                             sources=["upload", "microphone"],
                             type="filepath",
+                            format="mp3",
                         )
                         stream_btn = gr.Button("Stream transcription", variant="primary")
                         stream_text = gr.Textbox(label="Streaming transcript", lines=8)
                         stream_status = gr.Textbox(label="Stream status", lines=1)
+                        realtime_session = gr.State("")
+                        realtime_audio = gr.Audio(
+                            label="Realtime microphone",
+                            sources=["microphone"],
+                            type="numpy",
+                            streaming=True,
+                        )
+                        with gr.Row():
+                            realtime_finish = gr.Button("Finalize realtime", variant="secondary")
+                            realtime_reset = gr.Button("Reset realtime", variant="secondary")
+                        realtime_text = gr.Textbox(label="Realtime transcript", lines=8)
+                        realtime_status = gr.Textbox(label="Realtime status", lines=1)
 
                     with gr.Tab("API"):
                         refresh_btn = gr.Button("Refresh API status")
@@ -425,6 +523,27 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
             fn=stream_openai,
             inputs=[stream_audio, model, language, prompt, api_base_state],
             outputs=[stream_text, stream_status],
+        )
+        realtime_audio.stream(
+            fn=realtime_stream_openai,
+            inputs=[realtime_audio, realtime_session, model, language, prompt, api_base_state],
+            outputs=[realtime_text, realtime_status, realtime_session],
+            stream_every=0.5,
+        )
+        realtime_audio.stop_recording(
+            fn=finish_realtime_openai,
+            inputs=[realtime_session, api_base_state],
+            outputs=[realtime_text, realtime_status, realtime_session],
+        )
+        realtime_finish.click(
+            fn=finish_realtime_openai,
+            inputs=[realtime_session, api_base_state],
+            outputs=[realtime_text, realtime_status, realtime_session],
+        )
+        realtime_reset.click(
+            fn=reset_realtime_openai,
+            inputs=[realtime_session, api_base_state],
+            outputs=[realtime_text, realtime_status, realtime_session],
         )
         refresh_btn.click(fn=refresh_api_status, inputs=api_base_state, outputs=[api_status, gpu_html])
         gpu_refresh.click(fn=gpu_monitor_html, outputs=gpu_html)
