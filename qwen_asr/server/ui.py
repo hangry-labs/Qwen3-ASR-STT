@@ -1,47 +1,120 @@
 # coding=utf-8
-# Copyright 2026 The Alibaba Qwen team.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-A gradio demo for Qwen3 ASR models.
-"""
+from __future__ import annotations
 
-import base64
-import io
+import html
+import json
+import mimetypes
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+import time
+from pathlib import Path
+from typing import Any, Dict, Iterable
 
 import gradio as gr
-import numpy as np
+import httpx
 import torch
-from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
+import uvicorn
+from fastapi.staticfiles import StaticFiles
+
+from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
+from qwen_asr.server.openai_api import create_app as create_openai_app
 from qwen_asr.startup_logging import StartupTimer, log_startup
-from scipy.io.wavfile import write as wav_write
+from qwen_asr.web.branding import brand_css, brand_header_html
+from qwen_asr.web.gpu import gpu_monitor_html
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ASSET_DIR = REPO_ROOT / "hangrylabs"
+BRAND_ASSET_BASE = "/assets/hangrylabs"
+TESTBENCH_DIR = REPO_ROOT / "testbench"
+MANIFEST_PATH = TESTBENCH_DIR / "manifest.json"
 
-def _title_case_display(s: str) -> str:
-    s = (s or "").strip()
-    s = s.replace("_", " ")
-    return " ".join([w[:1].upper() + w[1:] if w else "" for w in s.split()])
+LANGUAGE_CHOICES = ["Auto"] + SUPPORTED_LANGUAGES
+RESPONSE_FORMATS = ["json", "text", "verbose_json", "srt", "vtt"]
+TIMESTAMP_GRANULARITIES = ["word", "segment"]
 
+GPU_CSS = """
+.gpu-monitor {
+    margin: 10px 0 4px;
+    padding: 12px;
+    border: 1px solid rgba(255, 176, 118, 0.22);
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(22, 12, 6, 0.95), rgba(7, 7, 8, 0.96));
+    color: #fff3e7;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 12px 24px rgba(0, 0, 0, 0.20);
+}
 
-def _build_choices_and_map(items: Optional[List[str]]) -> Tuple[List[str], Dict[str, str]]:
-    if not items:
-        return [], {}
-    display = [_title_case_display(x) for x in items]
-    mapping = {d: r for d, r in zip(display, items)}
-    return display, mapping
+.gpu-monitor-title {
+    margin-bottom: 9px;
+    font-size: 0.86rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+}
+
+.gpu-monitor-muted {
+    color: rgba(255, 243, 231, 0.68);
+    font-size: 0.86rem;
+}
+
+.gpu-card + .gpu-card {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 176, 118, 0.15);
+}
+
+.gpu-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.gpu-card-head strong {
+    color: #ffb066;
+}
+
+.gpu-card-head span,
+.gpu-metric-row span,
+.gpu-foot span {
+    color: rgba(255, 243, 231, 0.68);
+    font-size: 0.78rem;
+}
+
+.gpu-metric-row,
+.gpu-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.82rem;
+}
+
+.gpu-bar {
+    overflow: hidden;
+    height: 7px;
+    margin: 5px 0 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.gpu-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #ff6b00, #ffb066);
+}
+
+.gpu-vram span {
+    background: linear-gradient(90deg, #ffb066, #ffe0bd);
+}
+
+.gpu-sparkline {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+}
+"""
 
 
 def _dtype_from_str(s: str) -> torch.dtype:
@@ -55,107 +128,6 @@ def _dtype_from_str(s: str) -> torch.dtype:
     raise ValueError(f"Unsupported torch dtype: {s}. Use bfloat16/float16/float32.")
 
 
-def _normalize_audio(wav, eps=1e-12, clip=True):
-    x = np.asarray(wav)
-
-    if np.issubdtype(x.dtype, np.integer):
-        info = np.iinfo(x.dtype)
-        if info.min < 0:
-            y = x.astype(np.float32) / max(abs(info.min), info.max)
-        else:
-            mid = (info.max + 1) / 2.0
-            y = (x.astype(np.float32) - mid) / mid
-    elif np.issubdtype(x.dtype, np.floating):
-        y = x.astype(np.float32)
-        m = np.max(np.abs(y)) if y.size else 0.0
-        if m > 1.0 + 1e-6:
-            y = y / (m + eps)
-    else:
-        raise TypeError(f"Unsupported dtype: {x.dtype}")
-
-    if clip:
-        y = np.clip(y, -1.0, 1.0)
-
-    if y.ndim > 1:
-        y = np.mean(y, axis=-1).astype(np.float32)
-
-    return y
-
-
-def _audio_to_tuple(audio: Any) -> Optional[Tuple[np.ndarray, int]]:
-    """
-    Accept gradio audio:
-      - {"sampling_rate": int, "data": np.ndarray}
-      - (sr, np.ndarray)  [some gradio versions]
-    Return: (wav_float32_mono, sr)
-    """
-    if audio is None:
-        return None
-
-    if isinstance(audio, dict) and "sampling_rate" in audio and "data" in audio:
-        sr = int(audio["sampling_rate"])
-        wav = _normalize_audio(audio["data"])
-        return wav, sr
-
-    if isinstance(audio, tuple) and len(audio) == 2:
-        a0, a1 = audio
-        if isinstance(a0, int):
-            sr = int(a0)
-            wav = _normalize_audio(a1)
-            return wav, sr
-        if isinstance(a1, int):
-            wav = _normalize_audio(a0)
-            sr = int(a1)
-            return wav, sr
-
-    return None
-
-
-def _parse_audio_any(audio: Any) -> Union[str, Tuple[np.ndarray, int]]:
-    if audio is None:
-        raise ValueError("Audio is required.")
-    at = _audio_to_tuple(audio)
-    if at is not None:
-        return at
-    raise ValueError("Unsupported audio input format.")
-
-
-def _apply_cuda_visible_devices(cuda_visible_devices: str) -> None:
-    v = (cuda_visible_devices or "").strip()
-    if not v:
-        return
-    os.environ["CUDA_VISIBLE_DEVICES"] = v
-
-
-def _default_backend_kwargs(backend: str) -> Dict[str, Any]:
-    if backend == "transformers":
-        return dict(
-            dtype=torch.bfloat16,
-            device_map="cuda:0",
-            max_inference_batch_size=4,
-            max_new_tokens=512,
-        )
-    else:
-        return dict(
-            gpu_memory_utilization=0.8,
-            max_inference_batch_size=4,
-            max_new_tokens=4096,
-        )
-
-
-def _default_aligner_kwargs() -> Dict[str, Any]:
-    return dict(
-        dtype=torch.bfloat16,
-        device_map="cuda:0",
-    )
-
-
-def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    out = dict(base)
-    out.update(override)
-    return out
-
-
 def _coerce_special_types(d: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for k, v in d.items():
@@ -166,218 +138,296 @@ def _coerce_special_types(d: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _make_timestamp_html(audio_upload: Any, timestamps: Any) -> str:
-    """
-    Build HTML with per-token audio slices, using base64 data URLs.
-    Expect timestamps as list[dict] with keys: text, start_time, end_time (ms).
-    """
-    at = _audio_to_tuple(audio_upload)
-    if at is None:
-        raise ValueError("Audio input is required for visualization.")
-    audio, sr = at
+def _read_version_file() -> str:
+    try:
+        return (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
 
-    if not timestamps:
-        return "<div style='color:#666'>No timestamps to visualize.</div>"
-    if not isinstance(timestamps, list):
-        raise ValueError("Timestamps must be a list (JSON array).")
 
-    html_content = """
-    <style>
-        .word-alignment-container { display: flex; flex-wrap: wrap; gap: 10px; }
-        .word-box {
-            border: 1px solid #ddd; border-radius: 8px; padding: 10px;
-            background-color: #f9f9f9; box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-            text-align: center;
-        }
-        .word-text { font-size: 18px; font-weight: 700; margin-bottom: 5px; }
-        .word-time { font-size: 12px; color: #666; margin-bottom: 8px; }
-        .word-audio audio { width: 140px; height: 30px; }
-        details { border: 1px solid #ddd; border-radius: 6px; padding: 10px; background-color: #f7f7f7; }
-        summary { font-weight: 700; cursor: pointer; }
-    </style>
-    """
+def _get_cuda_devices() -> list[str]:
+    if not torch.cuda.is_available():
+        return []
+    return [torch.cuda.get_device_name(idx) for idx in range(torch.cuda.device_count())]
 
-    html_content += """
-    <details open>
-        <summary>Timestamps Visualization (时间戳可视化结果）</summary>
-        <div class="word-alignment-container" style="margin-top: 14px;">
-    """
 
-    for item in timestamps:
-        if not isinstance(item, dict):
+def _get_banner_runtime_html(model_name: str, backend: str) -> str:
+    version = html.escape(_read_version_file())
+    model = html.escape(model_name)
+    backend_label = html.escape(backend)
+    cuda_devices = _get_cuda_devices()
+    if cuda_devices:
+        visible = os.getenv("CUDA_VISIBLE_DEVICES", "").strip()
+        visible_ids = [part.strip() for part in visible.split(",") if part.strip()] if visible else []
+        gpu_lines = []
+        for idx, name in enumerate(cuda_devices):
+            display_idx = visible_ids[idx] if idx < len(visible_ids) else str(idx)
+            gpu_lines.append(f"{html.escape(display_idx)} : {html.escape(name)}")
+        hardware = "GPUs :<br>" + "<br>".join(gpu_lines)
+    else:
+        hardware = "Runtime : CPU"
+    return f"v{version} | {backend_label}<br>{model}<br>{hardware}"
+
+
+def _load_examples(limit: int = 12) -> list[list[Any]]:
+    if not MANIFEST_PATH.exists():
+        return []
+    try:
+        payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    examples: list[list[Any]] = []
+    seen_languages: set[str] = set()
+    for case in payload.get("cases", []):
+        language = str(case.get("language", "") or "")
+        audio_rel = str(case.get("audio", "") or "")
+        if not language or not audio_rel or language in seen_languages:
             continue
-        word = str(item.get("text", "") or "")
-        start = item.get("start_time", None)
-        end = item.get("end_time", None)
-        if start is None or end is None:
+        audio_path = TESTBENCH_DIR / audio_rel
+        if not audio_path.exists():
             continue
-
-        start = float(start)
-        end = float(end)
-        if end <= start:
-            continue
-
-        start_sample = max(0, int(start * sr))
-        end_sample = min(len(audio), int(end * sr))
-        if end_sample <= start_sample:
-            continue
-
-        seg = audio[start_sample:end_sample]
-        seg_i16 = (np.clip(seg, -1.0, 1.0) * 32767.0).astype(np.int16)
-
-        mem = io.BytesIO()
-        wav_write(mem, sr, seg_i16)
-        mem.seek(0)
-        b64 = base64.b64encode(mem.read()).decode("utf-8")
-        audio_src = f"data:audio/wav;base64,{b64}"
-
-        html_content += f"""
-        <div class="word-box">
-            <div class="word-text">{word}</div>
-            <div class="word-time">{start} - {end} s</div>
-            <div class="word-audio">
-                <audio controls preload="none" src="{audio_src}"></audio>
-            </div>
-        </div>
-        """
-
-    html_content += "</div></details>"
-    return html_content
+        examples.append([str(audio_path), language])
+        seen_languages.add(language)
+        if len(examples) >= limit:
+            break
+    return examples
 
 
-def build_demo(
-    asr: Qwen3ASRModel,
-    asr_ckpt: str,
-    backend: str,
-    aligner_ckpt: Optional[str] = None,
-) -> gr.Blocks:
-    supported_langs_raw = asr.get_supported_languages()
-    lang_choices_disp, lang_map = _build_choices_and_map([x for x in supported_langs_raw])
-    lang_choices = ["Auto"] + lang_choices_disp
+def _api_url(base_url: str, path: str) -> str:
+    return base_url.rstrip("/") + path
 
-    has_aligner = bool(aligner_ckpt)
 
-    theme = gr.themes.Soft(
-        font=[gr.themes.GoogleFont("Source Sans Pro"), "Arial", "sans-serif"],
+def _audio_path_from_gradio(audio_value: Any) -> str | None:
+    if audio_value is None:
+        return None
+    if isinstance(audio_value, (str, os.PathLike)):
+        return os.fspath(audio_value)
+    if isinstance(audio_value, dict):
+        path = audio_value.get("path") or audio_value.get("name")
+        return os.fspath(path) if path else None
+    path = getattr(audio_value, "path", None)
+    if path:
+        return os.fspath(path)
+    name = getattr(audio_value, "name", None)
+    return os.fspath(name) if name else None
+
+
+def _format_status(elapsed: float, response_format: str, status_code: int) -> str:
+    return f"HTTP {status_code} | {response_format} | {elapsed:.3f}s"
+
+
+def _extract_text(response_format: str, content: str) -> tuple[str, str]:
+    if response_format in {"text", "srt", "vtt"}:
+        return content, content
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return content, content
+    text = str(payload.get("text", ""))
+    return text, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _request_data(
+    *,
+    model: str,
+    language: str,
+    response_format: str,
+    prompt: str,
+    timestamp_granularities: Iterable[str],
+    stream: bool = False,
+) -> dict[str, str]:
+    data = {
+        "model": model,
+        "response_format": response_format,
+        "temperature": "0",
+    }
+    if language and language != "Auto":
+        data["language"] = language
+    if prompt and prompt.strip():
+        data["prompt"] = prompt
+    if timestamp_granularities:
+        data["timestamp_granularities[]"] = ",".join(timestamp_granularities)
+    if stream:
+        data["stream"] = "true"
+    return data
+
+
+def transcribe_openai(
+    audio_path: Any,
+    model: str,
+    language: str,
+    response_format: str,
+    prompt: str,
+    timestamp_granularities: list[str],
+    base_url: str,
+) -> tuple[str, str, str]:
+    audio_path = _audio_path_from_gradio(audio_path)
+    if not audio_path:
+        return "", "", "Audio input is required."
+
+    start = time.perf_counter()
+    mime = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
+    data = _request_data(
+        model=model,
+        language=language,
+        response_format=response_format,
+        prompt=prompt,
+        timestamp_granularities=timestamp_granularities,
     )
-    css = ".gradio-container {max-width: none !important;}"
+    with Path(audio_path).open("rb") as audio_file:
+        files = {"file": (Path(audio_path).name, audio_file, mime)}
+        with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+            response = client.post(_api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files)
+    elapsed = time.perf_counter() - start
+    if response.status_code >= 400:
+        return "", response.text, _format_status(elapsed, response_format, response.status_code)
+    text, details = _extract_text(response_format, response.text)
+    return text, details, _format_status(elapsed, response_format, response.status_code)
 
-    with gr.Blocks() as demo:
-        demo._qwen_asr_launch_theme = theme
-        demo._qwen_asr_launch_css = css
-        gr.Markdown(
-            f"""
-# Qwen3 ASR Demo
-**Backend:** `{backend}`  
-**ASR Checkpoint:** `{asr_ckpt}`  
-**Forced Aligner:** `{aligner_ckpt if aligner_ckpt else "(none)"}`  
-"""
-        )
+
+def stream_openai(
+    audio_path: Any,
+    model: str,
+    language: str,
+    prompt: str,
+    base_url: str,
+):
+    audio_path = _audio_path_from_gradio(audio_path)
+    if not audio_path:
+        yield "", "Audio input is required."
+        return
+
+    start = time.perf_counter()
+    mime = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
+    data = _request_data(
+        model=model,
+        language=language,
+        response_format="json",
+        prompt=prompt,
+        timestamp_granularities=[],
+        stream=True,
+    )
+    transcript = ""
+    with Path(audio_path).open("rb") as audio_file:
+        files = {"file": (Path(audio_path).name, audio_file, mime)}
+        with httpx.Client(timeout=httpx.Timeout(None, connect=10.0)) as client:
+            with client.stream("POST", _api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files) as response:
+                if response.status_code >= 400:
+                    yield "", f"HTTP {response.status_code} | {response.read().decode('utf-8', errors='replace')}"
+                    return
+                for line in response.iter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") == "transcript.text.delta":
+                        transcript += str(event.get("delta", ""))
+                        yield transcript, f"Streaming | {time.perf_counter() - start:.3f}s"
+                    elif event.get("type") == "transcript.text.done":
+                        transcript = str(event.get("text", transcript))
+                        yield transcript, f"Done | {time.perf_counter() - start:.3f}s"
+
+
+def refresh_api_status(base_url: str) -> tuple[str, str]:
+    with httpx.Client(timeout=10.0) as client:
+        health = client.get(_api_url(base_url, "/health"))
+        models = client.get(_api_url(base_url, "/v1/models"))
+        languages = client.get(_api_url(base_url, "/v1/audio/supported_languages"))
+    payload = {
+        "health": health.json() if health.headers.get("content-type", "").startswith("application/json") else health.text,
+        "models": models.json() if models.headers.get("content-type", "").startswith("application/json") else models.text,
+        "languages": languages.json() if languages.headers.get("content-type", "").startswith("application/json") else languages.text,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2), gpu_monitor_html()
+
+
+def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blocks:
+    app_css = brand_css(BRAND_ASSET_BASE) + GPU_CSS
+    header = brand_header_html(
+        product_name="Qwen3-ASR-STT",
+        description="Local speech-to-text testing for Qwen3-ASR with Docker-first OpenAI-compatible transcription APIs.",
+        links=[
+            ("Examples", "https://github.com/Hangry-Labs/Qwen3-ASR-STT/tree/main/testbench"),
+            ("GitHub", "https://github.com/Hangry-Labs/Qwen3-ASR-STT"),
+            ("API docs", "/docs"),
+            ("Models", "/v1/models"),
+        ],
+        capabilities=["OpenAI-compatible STT", "Offline baked assets", "Streaming responses", "GPU aware"],
+        runtime_html=_get_banner_runtime_html(model_name, backend),
+        asset_base=BRAND_ASSET_BASE,
+    )
+    examples = _load_examples()
+
+    with gr.Blocks(title="Qwen3-ASR-STT") as demo:
+        gr.HTML(f"<style>{app_css}</style>")
+        gr.HTML(header)
+        api_base_state = gr.State(openai_base_url)
 
         with gr.Row():
-            with gr.Column(scale=2):
-                audio_in = gr.Audio(label="Audio Input (上传音频)", type="numpy")
-                lang_in = gr.Dropdown(
-                    label="Language (语种)",
-                    choices=lang_choices,
-                    value="Auto",
-                    interactive=True,
+            with gr.Column(scale=1):
+                model = gr.Textbox(value="qwen3-asr", label="Model")
+                language = gr.Dropdown(choices=LANGUAGE_CHOICES, value="Auto", label="Language")
+                prompt = gr.Textbox(label="Prompt / context", lines=3, placeholder="Optional words, spelling, or context to help recognition.")
+                response_format = gr.Dropdown(choices=RESPONSE_FORMATS, value="json", label="Response format")
+                timestamp_granularities = gr.CheckboxGroup(
+                    choices=TIMESTAMP_GRANULARITIES,
+                    value=[],
+                    label="Timestamp granularities",
+                    info="Requires the forced aligner to be enabled in the container.",
                 )
-                if has_aligner:
-                    ts_in = gr.Checkbox(
-                        label="Return Timestamps (是否返回时间戳)",
-                        value=True,
-                    )
-                else:
-                    ts_in = gr.State(False)
-
-                btn = gr.Button("Transcribe (识别)", variant="primary")
+                temperature = gr.Number(value=0, label="Temperature", interactive=False, info="Deterministic transcription is enforced.")
 
             with gr.Column(scale=2):
-                out_lang = gr.Textbox(label="Detected Language", lines=1)
-                out_text = gr.Textbox(label="Result Text", lines=12)
-
-            if has_aligner:
-                with gr.Column(scale=3):
-                    out_ts = gr.JSON(label="Timestamps（时间戳结果）")
-                    viz_btn = gr.Button("Visualize Timestamps (可视化时间戳)", variant="secondary")
-            else:
-                with gr.Column(scale=3):
-                    out_ts = gr.State(None)
-                    viz_btn = gr.State(None)
-
-        # Put the visualization panel below the three columns
-        if has_aligner:
-            with gr.Row():
-                out_ts_html = gr.HTML(label="Timestamps Visualization (时间戳可视化结果)")
-        else:
-            out_ts_html = gr.State("")
-
-        def run(audio_upload: Any, lang_disp: str, return_ts: bool):
-            audio_obj = _parse_audio_any(audio_upload)
-
-            language = None
-            if lang_disp and lang_disp != "Auto":
-                language = lang_map.get(lang_disp, lang_disp)
-
-            return_ts = bool(return_ts) and has_aligner
-
-            results = asr.transcribe(
-                audio=audio_obj,
-                language=language,
-                return_time_stamps=return_ts,
-            )
-            if not isinstance(results, list) or len(results) != 1:
-                raise RuntimeError(
-                    f"Unexpected result size: {type(results)} "
-                    f"len={len(results) if isinstance(results, list) else 'N/A'}"
-                )
-
-            r = results[0]
-
-            if has_aligner:
-                ts_payload = None
-                if return_ts:
-                    ts_payload = [
-                        dict(
-                            text=getattr(t, "text", None),
-                            start_time=getattr(t, "start_time", None),
-                            end_time=getattr(t, "end_time", None),
+                with gr.Tabs():
+                    with gr.Tab("Transcribe"):
+                        audio_in = gr.Audio(
+                            label="Audio input",
+                            sources=["upload", "microphone"],
+                            type="filepath",
                         )
-                        for t in (getattr(r, "time_stamps", None) or [])
-                    ]
-                return (
-                    getattr(r, "language", "") or "",
-                    getattr(r, "text", "") or "",
-                    gr.update(value=ts_payload) if return_ts else gr.update(value=None),
-                    gr.update(value=""),  # clear html on each transcribe
-                )
-            else:
-                return (
-                    getattr(r, "language", "") or "",
-                    getattr(r, "text", "") or "",
-                )
+                        transcribe_btn = gr.Button("Transcribe", variant="primary")
+                        transcript = gr.Textbox(label="Transcript", lines=8)
+                        details = gr.Textbox(label="Response details", lines=10)
+                        status = gr.Textbox(label="Status", lines=1)
+                        if examples:
+                            gr.Examples(examples=examples, inputs=[audio_in, language], label="Example files")
 
-        def visualize(audio_upload: Any, timestamps_json: Any):
-            return _make_timestamp_html(audio_upload, timestamps_json)
+                    with gr.Tab("Stream"):
+                        stream_audio = gr.Audio(
+                            label="Audio input",
+                            sources=["upload", "microphone"],
+                            type="filepath",
+                        )
+                        stream_btn = gr.Button("Stream transcription", variant="primary")
+                        stream_text = gr.Textbox(label="Streaming transcript", lines=8)
+                        stream_status = gr.Textbox(label="Stream status", lines=1)
 
-        if has_aligner:
-            btn.click(
-                run,
-                inputs=[audio_in, lang_in, ts_in],
-                outputs=[out_lang, out_text, out_ts, out_ts_html],
-            )
-            viz_btn.click(
-                visualize,
-                inputs=[audio_in, out_ts],
-                outputs=[out_ts_html],
-            )
-        else:
-            btn.click(
-                run,
-                inputs=[audio_in, lang_in, ts_in],
-                outputs=[out_lang, out_text],
-            )
+                    with gr.Tab("API"):
+                        refresh_btn = gr.Button("Refresh API status")
+                        api_status = gr.Code(label="OpenAI API status", language="json", value="{}")
+
+                    with gr.Tab("System"):
+                        gpu_html = gr.HTML(gpu_monitor_html())
+                        gpu_refresh = gr.Button("Refresh GPU monitor")
+
+        transcribe_btn.click(
+            fn=transcribe_openai,
+            inputs=[audio_in, model, language, response_format, prompt, timestamp_granularities, api_base_state],
+            outputs=[transcript, details, status],
+        )
+        stream_btn.click(
+            fn=stream_openai,
+            inputs=[stream_audio, model, language, prompt, api_base_state],
+            outputs=[stream_text, stream_status],
+        )
+        refresh_btn.click(fn=refresh_api_status, inputs=api_base_state, outputs=[api_status, gpu_html])
+        gpu_refresh.click(fn=gpu_monitor_html, outputs=gpu_html)
 
     return demo
 
@@ -398,43 +448,38 @@ def run_server(
     ssl_keyfile: str | None = None,
     ssl_verify: bool = True,
 ) -> None:
-    log_startup("Gradio UI startup entered")
-    _apply_cuda_visible_devices(cuda_visible_devices)
+    del share, ssl_certfile, ssl_keyfile, ssl_verify
+
+    log_startup("Gradio OpenAI-backed UI startup entered")
     if cuda_visible_devices.strip():
+        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices.strip()
         log_startup(f"CUDA_VISIBLE_DEVICES set to {cuda_visible_devices.strip()}")
 
-    asr_ckpt = asr_checkpoint
-    aligner_ckpt = aligner_checkpoint
+    resolved_backend_kwargs = _coerce_special_types(backend_kwargs or {})
+    resolved_aligner_kwargs = _coerce_special_types(aligner_kwargs or {})
 
-    user_backend_kwargs = backend_kwargs or {}
-    user_aligner_kwargs = aligner_kwargs or {}
+    forced_aligner = aligner_checkpoint if aligner_checkpoint else None
 
-    with StartupTimer("prepare backend kwargs"):
-        backend_kwargs = _merge_dicts(_default_backend_kwargs(backend), user_backend_kwargs)
-        backend_kwargs = _coerce_special_types(backend_kwargs)
-
-    forced_aligner = None
-    forced_aligner_kwargs = None
-    if aligner_ckpt:
-        forced_aligner = aligner_ckpt
-        aligner_kwargs = _merge_dicts(_default_aligner_kwargs(), user_aligner_kwargs)
-        forced_aligner_kwargs = _coerce_special_types(aligner_kwargs)
+    with StartupTimer("import Qwen3ASRModel"):
+        from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
 
     with StartupTimer(f"load ASR model via {backend} backend"):
         if backend == "transformers":
             asr = Qwen3ASRModel.from_pretrained(
-                asr_ckpt,
+                asr_checkpoint,
                 forced_aligner=forced_aligner,
-                forced_aligner_kwargs=forced_aligner_kwargs,
-                **backend_kwargs,
+                forced_aligner_kwargs=resolved_aligner_kwargs if forced_aligner else None,
+                **resolved_backend_kwargs,
+            )
+        elif backend == "vllm":
+            asr = Qwen3ASRModel.LLM(
+                asr_checkpoint,
+                forced_aligner=forced_aligner,
+                forced_aligner_kwargs=resolved_aligner_kwargs if forced_aligner else None,
+                **resolved_backend_kwargs,
             )
         else:
-            asr = Qwen3ASRModel.LLM(
-                model=asr_ckpt,
-                forced_aligner=forced_aligner,
-                forced_aligner_kwargs=forced_aligner_kwargs,
-                **backend_kwargs,
-            )
+            raise ValueError(f"Unsupported backend: {backend}")
 
     warmup_enabled = os.getenv("QWEN_ASR_STARTUP_WARMUP", "0").strip().lower() in {"1", "true", "yes", "y"}
     if warmup_enabled:
@@ -442,22 +487,25 @@ def run_server(
         with StartupTimer(f"startup ASR warmup max_new_tokens={warmup_tokens}"):
             asr.warm_up(max_new_tokens=warmup_tokens)
 
-    with StartupTimer("build Gradio demo"):
-        demo = build_demo(asr, asr_ckpt, backend, aligner_ckpt=aligner_ckpt)
+    trace_requests = os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "y"}
+    openai_base_url = os.getenv("QWEN_ASR_UI_OPENAI_BASE_URL", f"http://127.0.0.1:{int(port)}")
 
-    launch_kwargs: Dict[str, Any] = dict(
-        server_name=host,
-        server_port=port,
-        share=share,
-        ssl_verify=True if ssl_verify else False,
-    )
-    if ssl_certfile is not None:
-        launch_kwargs["ssl_certfile"] = ssl_certfile
-    if ssl_keyfile is not None:
-        launch_kwargs["ssl_keyfile"] = ssl_keyfile
+    with StartupTimer("create OpenAI API app"):
+        app = create_openai_app(
+            asr=asr,
+            model_name=asr_checkpoint,
+            concurrency=concurrency,
+            trace_requests=trace_requests,
+        )
 
-    launch_kwargs["theme"] = getattr(demo, "_qwen_asr_launch_theme")
-    launch_kwargs["css"] = getattr(demo, "_qwen_asr_launch_css")
+    if ASSET_DIR.exists():
+        app.mount(BRAND_ASSET_BASE, StaticFiles(directory=ASSET_DIR), name="hangrylabs-assets")
 
-    log_startup(f"starting Gradio on {host}:{port}")
-    demo.queue(default_concurrency_limit=int(concurrency)).launch(**launch_kwargs)
+    with StartupTimer("build Gradio UI"):
+        demo = build_demo(model_name=asr_checkpoint, backend=backend, openai_base_url=openai_base_url)
+
+    with StartupTimer("mount Gradio UI"):
+        app = gr.mount_gradio_app(app, demo, path="/")
+
+    log_startup(f"starting UI/API uvicorn on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)

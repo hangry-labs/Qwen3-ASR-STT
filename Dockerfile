@@ -19,6 +19,8 @@ RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 -r /app/requirements.txt
 
 COPY qwen_asr /app/qwen_asr
+COPY hangrylabs /app/hangrylabs
+COPY testbench /app/testbench
 
 RUN python -m pip install -e . --no-deps
 
