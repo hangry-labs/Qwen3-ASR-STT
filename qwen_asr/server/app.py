@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
@@ -33,6 +34,7 @@ MANIFEST_PATH = TESTBENCH_DIR / "manifest.json"
 LANGUAGE_CHOICES = ["Auto"] + SUPPORTED_LANGUAGES
 RESPONSE_FORMATS = ["json", "text", "verbose_json", "srt", "vtt"]
 TIMESTAMP_GRANULARITIES = ["word", "segment"]
+UI_LOG_EVENTS = os.getenv("QWEN_ASR_UI_LOG_EVENTS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 GPU_CSS = """
 .gpu-monitor {
@@ -118,6 +120,30 @@ GPU_CSS = """
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
 }
 """
+
+
+def _log_ui(message: str) -> None:
+    if UI_LOG_EVENTS:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[ui {timestamp}] {message}", flush=True)
+
+
+def _describe_audio_value(audio_value: Any) -> str:
+    path = _audio_path_from_gradio(audio_value)
+    if path:
+        try:
+            size = Path(path).stat().st_size
+            return f"path={Path(path).name} bytes={size}"
+        except OSError:
+            return f"path={Path(path).name} bytes=?"
+    if isinstance(audio_value, tuple):
+        try:
+            sample_rate, samples = audio_value
+            shape = getattr(samples, "shape", None)
+            return f"tuple sample_rate={sample_rate} shape={shape}"
+        except (TypeError, ValueError):
+            return "tuple malformed"
+    return f"type={type(audio_value).__name__}"
 
 
 def _dtype_from_str(s: str) -> torch.dtype:
@@ -261,76 +287,42 @@ def transcribe_openai(
     timestamp_granularities: list[str],
     base_url: str,
 ) -> tuple[str, str, str]:
+    _log_ui(
+        "transcribe_openai start "
+        f"audio={_describe_audio_value(audio_path)} model={model!r} language={language!r} "
+        f"format={response_format!r} timestamps={timestamp_granularities!r} prompt_len={len(prompt or '')}"
+    )
     audio_path = _audio_path_from_gradio(audio_path)
     if not audio_path:
+        _log_ui("transcribe_openai missing audio")
         return "", "", "Audio input is required."
 
     start = time.perf_counter()
-    mime = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
-    data = _request_data(
-        model=model,
-        language=language,
-        response_format=response_format,
-        prompt=prompt,
-        timestamp_granularities=timestamp_granularities,
-    )
-    with Path(audio_path).open("rb") as audio_file:
-        files = {"file": (Path(audio_path).name, audio_file, mime)}
-        with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-            response = client.post(_api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files)
+    try:
+        mime = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
+        data = _request_data(
+            model=model,
+            language=language,
+            response_format=response_format,
+            prompt=prompt,
+            timestamp_granularities=timestamp_granularities,
+        )
+        with Path(audio_path).open("rb") as audio_file:
+            files = {"file": (Path(audio_path).name, audio_file, mime)}
+            with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+                response = client.post(_api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files)
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        _log_ui(f"transcribe_openai failed in {elapsed:.3f}s: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+        return "", str(exc), f"UI error | {type(exc).__name__} | {elapsed:.3f}s"
+
     elapsed = time.perf_counter() - start
+    _log_ui(f"transcribe_openai response status={response.status_code} elapsed={elapsed:.3f}s bytes={len(response.text)}")
     if response.status_code >= 400:
         return "", response.text, _format_status(elapsed, response_format, response.status_code)
     text, details = _extract_text(response_format, response.text)
+    _log_ui(f"transcribe_openai done text_len={len(text)} details_len={len(details)}")
     return text, details, _format_status(elapsed, response_format, response.status_code)
-
-
-def stream_openai(
-    audio_path: Any,
-    model: str,
-    language: str,
-    prompt: str,
-    base_url: str,
-):
-    audio_path = _audio_path_from_gradio(audio_path)
-    if not audio_path:
-        yield "", "Audio input is required."
-        return
-
-    start = time.perf_counter()
-    mime = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
-    data = _request_data(
-        model=model,
-        language=language,
-        response_format="json",
-        prompt=prompt,
-        timestamp_granularities=[],
-        stream=True,
-    )
-    transcript = ""
-    with Path(audio_path).open("rb") as audio_file:
-        files = {"file": (Path(audio_path).name, audio_file, mime)}
-        with httpx.Client(timeout=httpx.Timeout(None, connect=10.0)) as client:
-            with client.stream("POST", _api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files) as response:
-                if response.status_code >= 400:
-                    yield "", f"HTTP {response.status_code} | {response.read().decode('utf-8', errors='replace')}"
-                    return
-                for line in response.iter_lines():
-                    if not line or not line.startswith("data: "):
-                        continue
-                    payload = line[6:]
-                    if payload == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    if event.get("type") == "transcript.text.delta":
-                        transcript += str(event.get("delta", ""))
-                        yield transcript, f"Streaming | {time.perf_counter() - start:.3f}s"
-                    elif event.get("type") == "transcript.text.done":
-                        transcript = str(event.get("text", transcript))
-                        yield transcript, f"Done | {time.perf_counter() - start:.3f}s"
 
 
 def _wav_bytes_from_audio_chunk(audio_chunk: Any) -> tuple[bytes, float] | None:
@@ -362,67 +354,111 @@ def realtime_stream_openai(
     language: str,
     prompt: str,
     base_url: str,
+    chunk_size_sec: float,
+    unfixed_chunk_num: int,
+    unfixed_token_num: int,
 ) -> tuple[str, str, str]:
+    _log_ui(
+        "realtime_stream_openai start "
+        f"audio={_describe_audio_value(audio_chunk)} session={session_id or '-'} model={model!r} "
+        f"language={language!r} chunk_size={chunk_size_sec} unfixed_chunks={unfixed_chunk_num} "
+        f"unfixed_tokens={unfixed_token_num} prompt_len={len(prompt or '')}"
+    )
     wav_payload = _wav_bytes_from_audio_chunk(audio_chunk)
     if wav_payload is None:
+        _log_ui(f"realtime_stream_openai no audio payload session={session_id or '-'}")
         return "", "Listening.", session_id or ""
 
     audio_bytes, duration = wav_payload
-    with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-        if not session_id:
-            data: dict[str, Any] = {
-                "model": model,
-                "prompt": prompt or "",
-                "temperature": 0,
-                "chunk_size_sec": 2.0,
-                "unfixed_chunk_num": 2,
-                "unfixed_token_num": 5,
-            }
-            if language and language != "Auto":
-                data["language"] = language
-            response = client.post(_api_url(base_url, "/v1/realtime/transcriptions/sessions"), json=data)
-            if response.status_code >= 400:
-                return "", response.text, ""
-            session_id = str(response.json()["id"])
+    start = time.perf_counter()
+    try:
+        with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+            if not session_id:
+                data: dict[str, Any] = {
+                    "model": model,
+                    "prompt": prompt or "",
+                    "temperature": 0,
+                    "chunk_size_sec": float(chunk_size_sec or 2.0),
+                    "unfixed_chunk_num": int(unfixed_chunk_num or 2),
+                    "unfixed_token_num": int(unfixed_token_num or 5),
+                }
+                if language and language != "Auto":
+                    data["language"] = language
+                response = client.post(_api_url(base_url, "/v1/realtime/transcriptions/sessions"), json=data)
+                _log_ui(f"realtime_stream_openai create session status={response.status_code}")
+                if response.status_code >= 400:
+                    return "", response.text, ""
+                session_id = str(response.json()["id"])
 
-        files = {"file": ("chunk.wav", audio_bytes, "audio/wav")}
-        response = client.post(
-            _api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/audio"),
-            files=files,
-        )
+            files = {"file": ("chunk.wav", audio_bytes, "audio/wav")}
+            response = client.post(
+                _api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/audio"),
+                files=files,
+            )
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        _log_ui(f"realtime_stream_openai failed in {elapsed:.3f}s: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+        return "", f"UI error | {type(exc).__name__} | {elapsed:.3f}s", session_id or ""
+
+    elapsed = time.perf_counter() - start
     if response.status_code >= 400:
+        _log_ui(f"realtime_stream_openai append failed status={response.status_code} elapsed={elapsed:.3f}s body={response.text[:400]}")
         return "", response.text, session_id or ""
     payload = response.json()
     text = str(payload.get("text", ""))
     chunk_id = int(payload.get("chunk_id", 0))
     status = f"Realtime | session {session_id} | chunks {chunk_id} | last audio {duration:.2f}s"
+    _log_ui(f"realtime_stream_openai done status={response.status_code} session={session_id} chunk_id={chunk_id} text_len={len(text)} elapsed={elapsed:.3f}s")
     return text, status, session_id or ""
 
 
 def finish_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, str, str]:
+    _log_ui(f"finish_realtime_openai start session={session_id or '-'}")
     if not session_id:
+        _log_ui("finish_realtime_openai no active session")
         return "", "No active realtime session.", ""
-    with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-        response = client.post(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/finish"))
+    start = time.perf_counter()
+    try:
+        with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+            response = client.post(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/finish"))
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        _log_ui(f"finish_realtime_openai failed in {elapsed:.3f}s: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+        return "", f"UI error | {type(exc).__name__} | {elapsed:.3f}s", session_id
+    elapsed = time.perf_counter() - start
+    _log_ui(f"finish_realtime_openai response status={response.status_code} elapsed={elapsed:.3f}s")
     if response.status_code >= 400:
         return "", response.text, session_id
     payload = response.json()
     text = str(payload.get("text", ""))
+    _log_ui(f"finish_realtime_openai done text_len={len(text)}")
     return text, f"Finalized | session {session_id} | chunks {payload.get('chunk_id', 0)}", ""
 
 
 def reset_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, str, str]:
+    _log_ui(f"reset_realtime_openai start session={session_id or '-'}")
     if session_id:
-        with httpx.Client(timeout=10.0) as client:
-            client.delete(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}"))
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.delete(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}"))
+            _log_ui(f"reset_realtime_openai delete status={response.status_code}")
+        except Exception as exc:
+            _log_ui(f"reset_realtime_openai delete failed: {type(exc).__name__}: {exc}")
     return "", "Realtime session reset.", ""
 
 
 def refresh_api_status(base_url: str) -> tuple[str, str]:
+    _log_ui("refresh_api_status start")
+    start = time.perf_counter()
     with httpx.Client(timeout=10.0) as client:
         health = client.get(_api_url(base_url, "/health"))
         models = client.get(_api_url(base_url, "/v1/models"))
         languages = client.get(_api_url(base_url, "/v1/audio/supported_languages"))
+    _log_ui(
+        "refresh_api_status done "
+        f"health={health.status_code} models={models.status_code} languages={languages.status_code} "
+        f"elapsed={time.perf_counter() - start:.3f}s"
+    )
     payload = {
         "health": health.json() if health.headers.get("content-type", "").startswith("application/json") else health.text,
         "models": models.json() if models.headers.get("content-type", "").startswith("application/json") else models.text,
@@ -431,10 +467,10 @@ def refresh_api_status(base_url: str) -> tuple[str, str]:
     return json.dumps(payload, ensure_ascii=False, indent=2), gpu_monitor_html()
 
 
-def switch_ui_view(view: str) -> tuple[Any, Any, Any, Any, Any]:
+def switch_ui_view(view: str) -> tuple[Any, Any, Any, Any]:
     selected = view or "Transcribe"
+    _log_ui(f"switch_ui_view selected={selected!r}")
     return (
-        gr.update(visible=selected == "Transcribe"),
         gr.update(visible=selected == "Transcribe"),
         gr.update(visible=selected == "Stream"),
         gr.update(visible=selected == "API"),
@@ -469,7 +505,16 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                 model = gr.Textbox(value="qwen3-asr", label="Model")
                 language = gr.Dropdown(choices=LANGUAGE_CHOICES, value="Auto", label="Language")
                 prompt = gr.Textbox(label="Prompt / context", lines=3, placeholder="Optional words, spelling, or context to help recognition.")
-                with gr.Group(visible=True) as transcribe_options:
+                temperature = gr.Number(value=0, label="Temperature", interactive=False, info="Deterministic transcription is enforced.")
+
+            with gr.Column(scale=2):
+                ui_view = gr.Radio(
+                    choices=["Transcribe", "Stream", "API", "System"],
+                    value="Transcribe",
+                    label="View",
+                )
+
+                with gr.Group(visible=True) as transcribe_panel:
                     response_format = gr.Dropdown(choices=RESPONSE_FORMATS, value="json", label="Response format")
                     timestamp_granularities = gr.CheckboxGroup(
                         choices=TIMESTAMP_GRANULARITIES,
@@ -477,15 +522,6 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                         label="Timestamp granularities",
                         info="Requires the forced aligner to be enabled in the container.",
                     )
-                temperature = gr.Number(value=0, label="Temperature", interactive=False, info="Deterministic transcription is enforced.")
-
-            with gr.Column(scale=2):
-                view_selector = gr.Radio(
-                    choices=["Transcribe", "Stream", "API", "System"],
-                    value="Transcribe",
-                    label="View",
-                )
-                with gr.Group(visible=True) as transcribe_view:
                     audio_in = gr.Audio(
                         label="Audio input",
                         sources=["upload", "microphone"],
@@ -499,16 +535,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                     if examples:
                         gr.Examples(examples=examples, inputs=[audio_in, language], label="Example files")
 
-                with gr.Group(visible=False) as stream_view:
-                    stream_audio = gr.Audio(
-                        label="Audio input",
-                        sources=["upload", "microphone"],
-                        type="filepath",
-                        format="mp3",
-                    )
-                    stream_btn = gr.Button("Stream transcription", variant="primary")
-                    stream_text = gr.Textbox(label="Streaming transcript", lines=8)
-                    stream_status = gr.Textbox(label="Stream status", lines=1)
+                with gr.Group(visible=False) as stream_panel:
                     realtime_session = gr.State("")
                     realtime_audio = gr.Audio(
                         label="Realtime microphone",
@@ -516,24 +543,28 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                         type="numpy",
                         streaming=True,
                     )
+                    with gr.Accordion("Realtime settings", open=False):
+                        realtime_chunk_size = gr.Slider(0.5, 5.0, value=2.0, step=0.25, label="Chunk size seconds")
+                        realtime_unfixed_chunks = gr.Slider(0, 6, value=2, step=1, label="Unfixed chunks")
+                        realtime_unfixed_tokens = gr.Slider(0, 20, value=5, step=1, label="Unfixed tokens")
                     with gr.Row():
                         realtime_finish = gr.Button("Finalize realtime", variant="secondary")
                         realtime_reset = gr.Button("Reset realtime", variant="secondary")
                     realtime_text = gr.Textbox(label="Realtime transcript", lines=8)
                     realtime_status = gr.Textbox(label="Realtime status", lines=1)
 
-                with gr.Group(visible=False) as api_view:
+                with gr.Group(visible=False) as api_panel:
                     refresh_btn = gr.Button("Refresh API status")
                     api_status = gr.Code(label="OpenAI API status", language="json", value="{}")
 
-                with gr.Group(visible=False) as system_view:
+                with gr.Group(visible=False) as system_panel:
                     gpu_html = gr.HTML(gpu_monitor_html())
                     gpu_refresh = gr.Button("Refresh GPU monitor")
 
-        view_selector.change(
+        ui_view.change(
             fn=switch_ui_view,
-            inputs=view_selector,
-            outputs=[transcribe_options, transcribe_view, stream_view, api_view, system_view],
+            inputs=ui_view,
+            outputs=[transcribe_panel, stream_panel, api_panel, system_panel],
             queue=False,
         )
         transcribe_btn.click(
@@ -541,14 +572,19 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
             inputs=[audio_in, model, language, response_format, prompt, timestamp_granularities, api_base_state],
             outputs=[transcript, details, status],
         )
-        stream_btn.click(
-            fn=stream_openai,
-            inputs=[stream_audio, model, language, prompt, api_base_state],
-            outputs=[stream_text, stream_status],
-        )
         realtime_audio.stream(
             fn=realtime_stream_openai,
-            inputs=[realtime_audio, realtime_session, model, language, prompt, api_base_state],
+            inputs=[
+                realtime_audio,
+                realtime_session,
+                model,
+                language,
+                prompt,
+                api_base_state,
+                realtime_chunk_size,
+                realtime_unfixed_chunks,
+                realtime_unfixed_tokens,
+            ],
             outputs=[realtime_text, realtime_status, realtime_session],
             stream_every=0.5,
         )

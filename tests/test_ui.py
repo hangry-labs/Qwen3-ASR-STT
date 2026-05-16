@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
-from qwen_asr.server.ui import _audio_path_from_gradio, _load_examples, _request_data
+from qwen_asr.server.app import _audio_path_from_gradio, _load_examples, _request_data, switch_ui_view
 
 
 class UiCallbackInputTests(unittest.TestCase):
@@ -37,7 +37,7 @@ class UiCallbackInputTests(unittest.TestCase):
         import numpy as np
         import soundfile as sf
 
-        from qwen_asr.server.ui import _wav_bytes_from_audio_chunk
+        from qwen_asr.server.app import _wav_bytes_from_audio_chunk
 
         payload = _wav_bytes_from_audio_chunk((16000, np.zeros((8000,), dtype=np.float32)))
         self.assertIsNotNone(payload)
@@ -51,10 +51,14 @@ class UiCallbackInputTests(unittest.TestCase):
         self.assertEqual(sample_rate, 16000)
         self.assertEqual(audio.shape[0], 8000)
 
+    def test_switch_ui_view_only_shows_selected_panel(self):
+        updates = switch_ui_view("Stream")
+        self.assertEqual([update["visible"] for update in updates], [False, True, False, False])
+
 
 class UiCallbackSmokeTests(unittest.TestCase):
     def test_transcribe_callback_accepts_filedata_dict(self):
-        from qwen_asr.server import ui
+        from qwen_asr.server import app
 
         class FakeResponse:
             status_code = 200
@@ -74,10 +78,10 @@ class UiCallbackSmokeTests(unittest.TestCase):
                 return FakeResponse()
 
         with tempfile.NamedTemporaryFile(suffix=".wav") as audio_file:
-            original_client = ui.httpx.Client
-            ui.httpx.Client = FakeClient
+            original_client = app.httpx.Client
+            app.httpx.Client = FakeClient
             try:
-                transcript, details, status = ui.transcribe_openai(
+                transcript, details, status = app.transcribe_openai(
                     {"path": audio_file.name},
                     "qwen3-asr",
                     "Auto",
@@ -87,7 +91,7 @@ class UiCallbackSmokeTests(unittest.TestCase):
                     "http://127.0.0.1:8000",
                 )
             finally:
-                ui.httpx.Client = original_client
+                app.httpx.Client = original_client
 
         self.assertEqual(transcript, "ok")
         self.assertIn('"text": "ok"', details)

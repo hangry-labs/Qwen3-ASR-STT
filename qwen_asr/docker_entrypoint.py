@@ -172,7 +172,7 @@ def main() -> int:
         )
     else:
         with StartupTimer("import Gradio UI server"):
-            from qwen_asr.server.ui import run_server as run_ui
+            from qwen_asr.server.app import run_server as run_ui
 
         run_ui(
             asr_checkpoint=asr_model,
