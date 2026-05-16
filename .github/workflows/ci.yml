@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lightweight-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile Python sources
+        run: python -m compileall -q qwen_asr tests testbench
+
+      - name: Validate package metadata
+        run: python -c "import tomllib; tomllib.load(open('pyproject.toml','rb')); print('pyproject-ok')"
+
+      - name: Check Dockerfile syntax
+        run: docker build --check .

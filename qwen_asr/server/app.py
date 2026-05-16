@@ -238,6 +238,19 @@ def _audio_path_from_gradio(audio_value: Any) -> str | None:
     return os.fspath(name) if name else None
 
 
+def _select_transcribe_audio(upload_audio: Any, recorded_audio: Any, audio_source: str) -> tuple[Any, str]:
+    source = (audio_source or "Upload").strip()
+    if source == "Record":
+        return recorded_audio, "Record"
+    return upload_audio, "Upload"
+
+
+def switch_transcribe_audio_source(audio_source: str) -> tuple[Any, Any]:
+    show_record = (audio_source or "Upload") == "Record"
+    _log_ui(f"switch_transcribe_audio_source source={audio_source!r}")
+    return gr.update(visible=not show_record), gr.update(visible=show_record)
+
+
 def _format_status(elapsed: float, response_format: str, status_code: int) -> str:
     return f"HTTP {status_code} | {response_format} | {elapsed:.3f}s"
 
@@ -279,7 +292,9 @@ def _request_data(
 
 
 def transcribe_openai(
-    audio_path: Any,
+    upload_audio: Any,
+    recorded_audio: Any,
+    audio_source: str,
     model: str,
     language: str,
     response_format: str,
@@ -287,15 +302,17 @@ def transcribe_openai(
     timestamp_granularities: list[str],
     base_url: str,
 ) -> tuple[str, str, str]:
+    audio_value, selected_source = _select_transcribe_audio(upload_audio, recorded_audio, audio_source)
     _log_ui(
         "transcribe_openai start "
-        f"audio={_describe_audio_value(audio_path)} model={model!r} language={language!r} "
+        f"source={selected_source!r} audio={_describe_audio_value(audio_value)} "
+        f"model={model!r} language={language!r} "
         f"format={response_format!r} timestamps={timestamp_granularities!r} prompt_len={len(prompt or '')}"
     )
-    audio_path = _audio_path_from_gradio(audio_path)
+    audio_path = _audio_path_from_gradio(audio_value)
     if not audio_path:
-        _log_ui("transcribe_openai missing audio")
-        return "", "", "Audio input is required."
+        _log_ui(f"transcribe_openai missing audio source={selected_source!r}")
+        return "", "", f"{selected_source} audio input is required."
 
     start = time.perf_counter()
     try:
@@ -450,10 +467,16 @@ def reset_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, s
 def refresh_api_status(base_url: str) -> tuple[str, str]:
     _log_ui("refresh_api_status start")
     start = time.perf_counter()
-    with httpx.Client(timeout=10.0) as client:
-        health = client.get(_api_url(base_url, "/health"))
-        models = client.get(_api_url(base_url, "/v1/models"))
-        languages = client.get(_api_url(base_url, "/v1/audio/supported_languages"))
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            health = client.get(_api_url(base_url, "/health"))
+            models = client.get(_api_url(base_url, "/v1/models"))
+            languages = client.get(_api_url(base_url, "/v1/audio/supported_languages"))
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        _log_ui(f"refresh_api_status failed in {elapsed:.3f}s: {type(exc).__name__}: {exc}")
+        payload = {"error": type(exc).__name__, "message": str(exc)}
+        return json.dumps(payload, ensure_ascii=False, indent=2), gpu_monitor_html()
     _log_ui(
         "refresh_api_status done "
         f"health={health.status_code} models={models.status_code} languages={languages.status_code} "
@@ -467,15 +490,15 @@ def refresh_api_status(base_url: str) -> tuple[str, str]:
     return json.dumps(payload, ensure_ascii=False, indent=2), gpu_monitor_html()
 
 
-def load_example_choice(example_label: str | None, example_lookup: dict[str, list[str]]) -> tuple[Any, Any]:
+def load_example_choice(example_label: str | None, example_lookup: dict[str, list[str]]) -> tuple[Any, Any, Any, Any, Any]:
     _log_ui(f"load_example_choice selected={example_label!r}")
     if not example_label:
-        return gr.update(), gr.update()
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
     example = example_lookup.get(example_label)
     if not example:
-        return gr.update(), gr.update()
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
     audio_path, language = example
-    return audio_path, language
+    return audio_path, language, "Upload", gr.update(visible=True), gr.update(visible=False)
 
 
 def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blocks:
@@ -513,18 +536,32 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                 with gr.Tabs():
                     with gr.Tab("Transcribe"):
                         response_format = gr.Dropdown(choices=RESPONSE_FORMATS, value="json", label="Response format")
-                        timestamp_granularities = gr.CheckboxGroup(
-                            choices=TIMESTAMP_GRANULARITIES,
-                            value=[],
-                            label="Timestamp granularities",
-                            info="Requires the forced aligner to be enabled in the container.",
+                        with gr.Accordion("Timestamp output", open=False):
+                            timestamp_granularities = gr.CheckboxGroup(
+                                choices=TIMESTAMP_GRANULARITIES,
+                                value=[],
+                                label="Timestamp granularities",
+                                info="Transcribe-only output option. Requires the forced aligner to be enabled in the container.",
+                            )
+                        audio_source = gr.Radio(
+                            choices=["Upload", "Record"],
+                            value="Upload",
+                            label="Audio source",
                         )
-                        audio_in = gr.Audio(
-                            label="Audio input",
-                            sources=["upload", "microphone"],
-                            type="filepath",
-                            format="mp3",
-                        )
+                        with gr.Group(visible=True) as upload_audio_group:
+                            audio_upload = gr.Audio(
+                                label="Upload audio",
+                                sources=["upload"],
+                                type="filepath",
+                                format="mp3",
+                            )
+                        with gr.Group(visible=False) as record_audio_group:
+                            audio_record = gr.Audio(
+                                label="Record audio",
+                                sources=["microphone"],
+                                type="filepath",
+                                format="mp3",
+                            )
                         if example_lookup:
                             with gr.Row():
                                 example_choice = gr.Dropdown(
@@ -559,7 +596,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                         realtime_text = gr.Textbox(label="Realtime transcript", lines=8)
                         realtime_status = gr.Textbox(label="Realtime status", lines=1)
 
-                    with gr.Tab("API"):
+                    with gr.Tab("API") as api_tab:
                         refresh_btn = gr.Button("Refresh API status")
                         api_status = gr.Code(label="OpenAI API status", language="json", value="{}")
 
@@ -571,12 +608,28 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
             example_load.click(
                 fn=load_example_choice,
                 inputs=[example_choice, example_lookup_state],
-                outputs=[audio_in, language],
+                outputs=[audio_upload, language, audio_source, upload_audio_group, record_audio_group],
                 queue=False,
             )
+        audio_source.change(
+            fn=switch_transcribe_audio_source,
+            inputs=audio_source,
+            outputs=[upload_audio_group, record_audio_group],
+            queue=False,
+        )
         transcribe_btn.click(
             fn=transcribe_openai,
-            inputs=[audio_in, model, language, response_format, prompt, timestamp_granularities, api_base_state],
+            inputs=[
+                audio_upload,
+                audio_record,
+                audio_source,
+                model,
+                language,
+                response_format,
+                prompt,
+                timestamp_granularities,
+                api_base_state,
+            ],
             outputs=[transcript, details, status],
         )
         realtime_audio.stream(
@@ -611,6 +664,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
             outputs=[realtime_text, realtime_status, realtime_session],
         )
         refresh_btn.click(fn=refresh_api_status, inputs=api_base_state, outputs=[api_status, gpu_html])
+        api_tab.select(fn=refresh_api_status, inputs=api_base_state, outputs=[api_status, gpu_html], queue=False)
         gpu_refresh.click(fn=gpu_monitor_html, outputs=gpu_html)
 
     return demo

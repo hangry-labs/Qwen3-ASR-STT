@@ -24,7 +24,7 @@ Append one row per successful comparable test so model/runtime choices can be co
   - `QWEN_ASR_MAX_INFERENCE_BATCH_SIZE=2`
   - `QWEN_ASR_MAX_NEW_TOKENS=1024`
 - Tune `QWEN_ASR_GPU_MEMORY_UTILIZATION` per model so vLLM reports about `2x` maximum concurrency for 4096-token requests.
-- Keep failed, partial, incompatible, and not-yet-measured experiments out of this public comparison table. Record that context in private agent notes or issue notes instead.
+- Keep failed, partial, incompatible, and not-yet-measured experiments out of this public comparison table. Record that context in private project notes or issue notes instead.
 - KV cache quantization is tracked separately from model weight quantization. vLLM `kv_cache_dtype=auto` means unquantized default cache dtype for the loaded model.
 - `QWEN_ASR_ENABLE_ALIGNER=0` means the forced aligner may be baked or cached on disk, but it is not loaded into runtime VRAM.
 - GGUF rows should be added only after a GGUF runtime path can run the model as an active service with the same target profile.

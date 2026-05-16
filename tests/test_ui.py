@@ -5,7 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
-from qwen_asr.server.app import _audio_path_from_gradio, _load_examples, _request_data, load_example_choice
+from qwen_asr.server.app import (
+    _audio_path_from_gradio,
+    _load_examples,
+    _request_data,
+    _select_transcribe_audio,
+    load_example_choice,
+)
 
 
 class UiCallbackInputTests(unittest.TestCase):
@@ -52,9 +58,24 @@ class UiCallbackInputTests(unittest.TestCase):
         self.assertEqual(audio.shape[0], 8000)
 
     def test_load_example_choice_returns_audio_and_language(self):
-        audio_path, language = load_example_choice("English - 01.mp3", {"English - 01.mp3": ["sample.mp3", "English"]})
+        audio_path, language, audio_source, upload_visibility, record_visibility = load_example_choice(
+            "English - 01.mp3",
+            {"English - 01.mp3": ["sample.mp3", "English"]},
+        )
         self.assertEqual(audio_path, "sample.mp3")
         self.assertEqual(language, "English")
+        self.assertEqual(audio_source, "Upload")
+        self.assertIsNotNone(upload_visibility)
+        self.assertIsNotNone(record_visibility)
+
+    def test_select_transcribe_audio_honors_source(self):
+        selected, label = _select_transcribe_audio("upload.wav", "record.wav", "Upload")
+        self.assertEqual(selected, "upload.wav")
+        self.assertEqual(label, "Upload")
+
+        selected, label = _select_transcribe_audio("upload.wav", "record.wav", "Record")
+        self.assertEqual(selected, "record.wav")
+        self.assertEqual(label, "Record")
 
 
 class UiCallbackSmokeTests(unittest.TestCase):
@@ -84,6 +105,8 @@ class UiCallbackSmokeTests(unittest.TestCase):
             try:
                 transcript, details, status = app.transcribe_openai(
                     {"path": audio_file.name},
+                    None,
+                    "Upload",
                     "qwen3-asr",
                     "Auto",
                     "json",

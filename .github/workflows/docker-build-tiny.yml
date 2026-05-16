@@ -1,0 +1,110 @@
+name: Build and Push Docker Image (tiny)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*"
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional Docker tag to publish, for example v0.2.0"
+        required: false
+        type: string
+      checkout_ref:
+        description: "Optional git ref to build. Defaults to image_tag when image_tag is set."
+        required: false
+        type: string
+      push_latest_tiny:
+        description: "Publish latest_tiny"
+        required: false
+        default: true
+        type: boolean
+
+env:
+  IMAGE_NAME: hangrylabs/qwen3-asr-stt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-tiny-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || inputs.image_tag || github.ref }}
+
+      - name: Free up disk space
+        run: |
+          echo "Initial disk usage:"
+          df -h
+
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/hostedtoolcache || true
+          docker system prune -af || true
+
+          echo "Disk usage after cleanup:"
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Resolve image tags
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version=""
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF##refs/tags/}"
+          elif [[ -n "${{ inputs.image_tag }}" ]]; then
+            version="${{ inputs.image_tag }}"
+          fi
+
+          tags=()
+          if [[ "${GITHUB_REF}" == refs/heads/main && "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            tags+=("${IMAGE_NAME}:latest_tiny")
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.push_latest_tiny }}" == "true" ]]; then
+            tags+=("${IMAGE_NAME}:latest_tiny")
+          fi
+          if [[ -n "${version}" ]]; then
+            tags+=("${IMAGE_NAME}:${version}_tiny")
+          fi
+
+          if [[ "${#tags[@]}" -eq 0 ]]; then
+            echo "No tags selected for publishing." >&2
+            exit 1
+          fi
+
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push tiny Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: tiny
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
