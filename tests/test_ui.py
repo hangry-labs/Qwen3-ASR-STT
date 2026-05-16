@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
-from qwen_asr.server.app import _audio_path_from_gradio, _load_examples, _request_data, switch_ui_view
+from qwen_asr.server.app import _audio_path_from_gradio, _load_examples, _request_data, load_example_choice
 
 
 class UiCallbackInputTests(unittest.TestCase):
@@ -51,9 +51,10 @@ class UiCallbackInputTests(unittest.TestCase):
         self.assertEqual(sample_rate, 16000)
         self.assertEqual(audio.shape[0], 8000)
 
-    def test_switch_ui_view_only_shows_selected_panel(self):
-        updates = switch_ui_view("Stream")
-        self.assertEqual([update["visible"] for update in updates], [False, True, False, False])
+    def test_load_example_choice_returns_audio_and_language(self):
+        audio_path, language = load_example_choice("English - 01.mp3", {"English - 01.mp3": ["sample.mp3", "English"]})
+        self.assertEqual(audio_path, "sample.mp3")
+        self.assertEqual(language, "English")
 
 
 class UiCallbackSmokeTests(unittest.TestCase):
