@@ -6,10 +6,12 @@ import io
 import json
 import mimetypes
 import os
+import re
 import time
 import traceback
 from pathlib import Path
 from typing import Any, Dict, Iterable
+from urllib.parse import urlsplit
 
 import gradio as gr
 import httpx
@@ -35,6 +37,8 @@ LANGUAGE_CHOICES = ["Auto"] + SUPPORTED_LANGUAGES
 RESPONSE_FORMATS = ["json", "text", "verbose_json", "srt", "vtt"]
 TIMESTAMP_GRANULARITIES = ["word", "segment"]
 UI_LOG_EVENTS = os.getenv("QWEN_ASR_UI_LOG_EVENTS", "1").strip().lower() not in {"0", "false", "no", "off"}
+LOCAL_API_HOSTS = {"127.0.0.1", "localhost", "::1"}
+REALTIME_SESSION_ID_RE = re.compile(r"^rt_[0-9a-f]{32}$")
 
 GPU_CSS = """
 .gpu-monitor {
@@ -131,11 +135,7 @@ def _log_ui(message: str) -> None:
 def _describe_audio_value(audio_value: Any) -> str:
     path = _audio_path_from_gradio(audio_value)
     if path:
-        try:
-            size = Path(path).stat().st_size
-            return f"path={Path(path).name} bytes={size}"
-        except OSError:
-            return f"path={Path(path).name} bytes=?"
+        return f"path={Path(path).name}"
     if isinstance(audio_value, tuple):
         try:
             sample_rate, samples = audio_value
@@ -219,8 +219,31 @@ def _load_examples() -> list[list[Any]]:
     return [[by_language[language], language] for language in SUPPORTED_LANGUAGES if language in by_language]
 
 
+def _validate_local_api_base_url(base_url: str) -> str:
+    parsed = urlsplit((base_url or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("UI OpenAI API base URL must use http or https.")
+    if parsed.username or parsed.password:
+        raise ValueError("UI OpenAI API base URL must not include credentials.")
+    if parsed.hostname not in LOCAL_API_HOSTS:
+        raise ValueError("UI OpenAI API base URL must target localhost or loopback.")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("UI OpenAI API base URL must not include a path, query, or fragment.")
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
 def _api_url(base_url: str, path: str) -> str:
-    return base_url.rstrip("/") + path
+    return _validate_local_api_base_url(base_url) + path
+
+
+def _realtime_session_id(session_id: str | None) -> str:
+    if not session_id:
+        raise ValueError("No active realtime session.")
+    value = str(session_id)
+    if not REALTIME_SESSION_ID_RE.fullmatch(value):
+        raise ValueError("Invalid realtime session id.")
+    return value
+
 
 
 def _audio_path_from_gradio(audio_value: Any) -> str | None:
@@ -309,14 +332,17 @@ def transcribe_openai(
         f"model={model!r} language={language!r} "
         f"format={response_format!r} timestamps={timestamp_granularities!r} prompt_len={len(prompt or '')}"
     )
-    audio_path = _audio_path_from_gradio(audio_value)
-    if not audio_path:
+    if audio_value is None:
         _log_ui(f"transcribe_openai missing audio source={selected_source!r}")
         return "", "", f"{selected_source} audio input is required."
+    file_payload = _audio_file_payload(audio_value)
+    if file_payload is None:
+        _log_ui(f"transcribe_openai invalid audio source={selected_source!r}")
+        return "", "", f"{selected_source} audio input is invalid."
+    filename, audio_bytes, mime = file_payload
 
     start = time.perf_counter()
     try:
-        mime = mimetypes.guess_type(audio_path)[0] or "application/octet-stream"
         data = _request_data(
             model=model,
             language=language,
@@ -324,10 +350,9 @@ def transcribe_openai(
             prompt=prompt,
             timestamp_granularities=timestamp_granularities,
         )
-        with Path(audio_path).open("rb") as audio_file:
-            files = {"file": (Path(audio_path).name, audio_file, mime)}
-            with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-                response = client.post(_api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files)
+        files = {"file": (filename, audio_bytes, mime)}
+        with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+            response = client.post(_api_url(base_url, "/v1/audio/transcriptions"), data=data, files=files)
     except Exception as exc:
         elapsed = time.perf_counter() - start
         _log_ui(f"transcribe_openai failed in {elapsed:.3f}s: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
@@ -340,6 +365,28 @@ def transcribe_openai(
     text, details = _extract_text(response_format, response.text)
     _log_ui(f"transcribe_openai done text_len={len(text)} details_len={len(details)}")
     return text, details, _format_status(elapsed, response_format, response.status_code)
+
+
+def _audio_file_payload(audio_value: Any) -> tuple[str, bytes, str] | None:
+    wav_payload = _wav_bytes_from_audio_chunk(audio_value)
+    if wav_payload is not None:
+        audio_bytes, _duration = wav_payload
+        return "audio.wav", audio_bytes, "audio/wav"
+
+    audio_path = _audio_path_from_gradio(audio_value)
+    if not audio_path:
+        return None
+
+    path = Path(audio_path)
+    try:
+        audio_bytes = path.read_bytes()
+    except OSError:
+        return None
+    if not audio_bytes:
+        return None
+
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return path.name or "audio", audio_bytes, mime
 
 
 def _wav_bytes_from_audio_chunk(audio_chunk: Any) -> tuple[bytes, float] | None:
@@ -407,9 +454,10 @@ def realtime_stream_openai(
                     return "", response.text, ""
                 session_id = str(response.json()["id"])
 
+            safe_session_id = _realtime_session_id(session_id)
             files = {"file": ("chunk.wav", audio_bytes, "audio/wav")}
             response = client.post(
-                _api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/audio"),
+                _api_url(base_url, f"/v1/realtime/transcriptions/sessions/{safe_session_id}/audio"),
                 files=files,
             )
     except Exception as exc:
@@ -436,8 +484,9 @@ def finish_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, 
         return "", "No active realtime session.", ""
     start = time.perf_counter()
     try:
+        safe_session_id = _realtime_session_id(session_id)
         with httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-            response = client.post(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}/finish"))
+            response = client.post(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{safe_session_id}/finish"))
     except Exception as exc:
         elapsed = time.perf_counter() - start
         _log_ui(f"finish_realtime_openai failed in {elapsed:.3f}s: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
@@ -449,15 +498,16 @@ def finish_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, 
     payload = response.json()
     text = str(payload.get("text", ""))
     _log_ui(f"finish_realtime_openai done text_len={len(text)}")
-    return text, f"Finalized | session {session_id} | chunks {payload.get('chunk_id', 0)}", ""
+    return text, f"Finalized | session {safe_session_id} | chunks {payload.get('chunk_id', 0)}", ""
 
 
 def reset_realtime_openai(session_id: str | None, base_url: str) -> tuple[str, str, str]:
     _log_ui(f"reset_realtime_openai start session={session_id or '-'}")
     if session_id:
         try:
+            safe_session_id = _realtime_session_id(session_id)
             with httpx.Client(timeout=10.0) as client:
-                response = client.delete(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{session_id}"))
+                response = client.delete(_api_url(base_url, f"/v1/realtime/transcriptions/sessions/{safe_session_id}"))
             _log_ui(f"reset_realtime_openai delete status={response.status_code}")
         except Exception as exc:
             _log_ui(f"reset_realtime_openai delete failed: {type(exc).__name__}: {exc}")
@@ -518,11 +568,64 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
     )
     examples = _load_examples()
     example_lookup = {f"{language} - {Path(audio_path).name}": [audio_path, language] for audio_path, language in examples}
+    api_base_url = _validate_local_api_base_url(openai_base_url)
+
+    def transcribe_callback(
+        upload_audio: Any,
+        recorded_audio: Any,
+        audio_source: str,
+        model: str,
+        language: str,
+        response_format: str,
+        prompt: str,
+        timestamp_granularities: list[str],
+    ) -> tuple[str, str, str]:
+        return transcribe_openai(
+            upload_audio,
+            recorded_audio,
+            audio_source,
+            model,
+            language,
+            response_format,
+            prompt,
+            timestamp_granularities,
+            api_base_url,
+        )
+
+    def realtime_stream_callback(
+        audio_chunk: Any,
+        session_id: str | None,
+        model: str,
+        language: str,
+        prompt: str,
+        chunk_size_sec: float,
+        unfixed_chunk_num: int,
+        unfixed_token_num: int,
+    ) -> tuple[str, str, str]:
+        return realtime_stream_openai(
+            audio_chunk,
+            session_id,
+            model,
+            language,
+            prompt,
+            api_base_url,
+            chunk_size_sec,
+            unfixed_chunk_num,
+            unfixed_token_num,
+        )
+
+    def finish_realtime_callback(session_id: str | None) -> tuple[str, str, str]:
+        return finish_realtime_openai(session_id, api_base_url)
+
+    def reset_realtime_callback(session_id: str | None) -> tuple[str, str, str]:
+        return reset_realtime_openai(session_id, api_base_url)
+
+    def refresh_api_status_callback() -> tuple[str, str]:
+        return refresh_api_status(api_base_url)
 
     with gr.Blocks(title="Qwen3-ASR-STT") as demo:
         gr.HTML(f"<style>{app_css}</style>")
         gr.HTML(header)
-        api_base_state = gr.State(openai_base_url)
         example_lookup_state = gr.State(example_lookup)
 
         with gr.Row():
@@ -530,7 +633,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                 model = gr.Textbox(value="qwen3-asr", label="Model")
                 language = gr.Dropdown(choices=LANGUAGE_CHOICES, value="Auto", label="Language")
                 prompt = gr.Textbox(label="Prompt / context", lines=3, placeholder="Optional words, spelling, or context to help recognition.")
-                temperature = gr.Number(value=0, label="Temperature", interactive=False, info="Deterministic transcription is enforced.")
+                gr.Number(value=0, label="Temperature", interactive=False, info="Deterministic transcription is enforced.")
 
             with gr.Column(scale=2):
                 with gr.Tabs():
@@ -552,16 +655,18 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                             audio_upload = gr.Audio(
                                 label="Upload audio",
                                 sources=["upload"],
-                                type="filepath",
+                                type="numpy",
                                 format="mp3",
                             )
                         with gr.Group(visible=False) as record_audio_group:
                             audio_record = gr.Audio(
                                 label="Record audio",
                                 sources=["microphone"],
-                                type="filepath",
+                                type="numpy",
                                 format="mp3",
                             )
+                        example_choice = None
+                        example_load = None
                         if example_lookup:
                             with gr.Row():
                                 example_choice = gr.Dropdown(
@@ -570,9 +675,6 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                                     filterable=True,
                                 )
                                 example_load = gr.Button("Load example", variant="secondary")
-                        else:
-                            example_choice = None
-                            example_load = None
                         transcribe_btn = gr.Button("Transcribe", variant="primary")
                         transcript = gr.Textbox(label="Transcript", lines=8)
                         details = gr.Textbox(label="Response details", lines=10)
@@ -618,7 +720,7 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
             queue=False,
         )
         transcribe_btn.click(
-            fn=transcribe_openai,
+            fn=transcribe_callback,
             inputs=[
                 audio_upload,
                 audio_record,
@@ -628,19 +730,17 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
                 response_format,
                 prompt,
                 timestamp_granularities,
-                api_base_state,
             ],
             outputs=[transcript, details, status],
         )
         realtime_audio.stream(
-            fn=realtime_stream_openai,
+            fn=realtime_stream_callback,
             inputs=[
                 realtime_audio,
                 realtime_session,
                 model,
                 language,
                 prompt,
-                api_base_state,
                 realtime_chunk_size,
                 realtime_unfixed_chunks,
                 realtime_unfixed_tokens,
@@ -649,22 +749,22 @@ def build_demo(*, model_name: str, backend: str, openai_base_url: str) -> gr.Blo
             stream_every=0.5,
         )
         realtime_audio.stop_recording(
-            fn=finish_realtime_openai,
-            inputs=[realtime_session, api_base_state],
+            fn=finish_realtime_callback,
+            inputs=realtime_session,
             outputs=[realtime_text, realtime_status, realtime_session],
         )
         realtime_finish.click(
-            fn=finish_realtime_openai,
-            inputs=[realtime_session, api_base_state],
+            fn=finish_realtime_callback,
+            inputs=realtime_session,
             outputs=[realtime_text, realtime_status, realtime_session],
         )
         realtime_reset.click(
-            fn=reset_realtime_openai,
-            inputs=[realtime_session, api_base_state],
+            fn=reset_realtime_callback,
+            inputs=realtime_session,
             outputs=[realtime_text, realtime_status, realtime_session],
         )
-        refresh_btn.click(fn=refresh_api_status, inputs=api_base_state, outputs=[api_status, gpu_html])
-        api_tab.select(fn=refresh_api_status, inputs=api_base_state, outputs=[api_status, gpu_html], queue=False)
+        refresh_btn.click(fn=refresh_api_status_callback, outputs=[api_status, gpu_html])
+        api_tab.select(fn=refresh_api_status_callback, outputs=[api_status, gpu_html], queue=False)
         gpu_refresh.click(fn=gpu_monitor_html, outputs=gpu_html)
 
     return demo

@@ -1,5 +1,5 @@
 <p>
-  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/hangrylabs/banner.jpg" alt="Hangry Labs Qwen3-ASR-STT banner">
+  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/logo.jpg" alt="Hangry Labs Qwen3-ASR-STT banner">
 </p>
 
 # Hangry Labs Qwen3-ASR-STT

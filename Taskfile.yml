@@ -86,6 +86,11 @@ tasks:
     cmds:
       - 'cmd /c ".venv\Scripts\python.exe" -m compileall -q qwen_asr testbench examples'
 
+  codeql:
+    desc: Run CodeQL Python security-and-quality analysis
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_codeql.ps1
+
   deps:
     desc: Regenerate Linux/Python 3.13 requirements.txt from requirements.in
     cmds:

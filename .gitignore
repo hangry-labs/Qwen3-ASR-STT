@@ -23,4 +23,5 @@ venv/
 env/
 
 .idea
+.codeql/
 testbench/results/*.json

@@ -55,9 +55,11 @@ from .utils import (
 
 try:
     with StartupTimer("register custom vLLM Qwen3-ASR model"):
-        from qwen_asr.core.vllm_backend import Qwen3ASRForConditionalGeneration
         from vllm import ModelRegistry
-        ModelRegistry.register_model("Qwen3ASRForConditionalGeneration", Qwen3ASRForConditionalGeneration)
+        ModelRegistry.register_model(
+            "Qwen3ASRForConditionalGeneration",
+            "qwen_asr.core.vllm_backend:Qwen3ASRForConditionalGeneration",
+        )
 except Exception as exc:
     log_startup(f"custom vLLM model registration skipped: {type(exc).__name__}: {exc}")
 

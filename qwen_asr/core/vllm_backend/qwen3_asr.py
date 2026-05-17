@@ -106,7 +106,7 @@ from ..transformers_backend.processing_qwen3_asr import (
 
 try:
     from vllm.multimodal.profiling import BaseDummyInputsBuilder
-except:
+except ImportError:
     from vllm.multimodal.processing import BaseDummyInputsBuilder
 
 logger = init_logger(__name__)

@@ -435,7 +435,6 @@ def parse_asr_output(
         # user explicitly forced language => model output is treated as pure text
         return user_language, s
 
-    meta_part = s
     text_part = ""
     has_tag = _ASR_TEXT_TAG in s
     if has_tag:

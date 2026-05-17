@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
 from qwen_asr.server.app import (
     _audio_path_from_gradio,
+    _api_url,
+    _realtime_session_id,
     _load_examples,
     _request_data,
     _select_transcribe_audio,
@@ -33,6 +35,17 @@ class UiCallbackInputTests(unittest.TestCase):
             timestamp_granularities=[],
         )
         self.assertEqual(data["temperature"], "0")
+
+    def test_api_url_only_allows_local_loopback_base_urls(self):
+        self.assertEqual(_api_url("http://127.0.0.1:8000/", "/health"), "http://127.0.0.1:8000/health")
+        with self.assertRaises(ValueError):
+            _api_url("http://example.com", "/health")
+
+    def test_realtime_session_id_accepts_api_session_format(self):
+        session_id = "rt_3999f309ae224eab8178c70b0b9d56e6"
+        self.assertEqual(_realtime_session_id(session_id), session_id)
+        with self.assertRaises(ValueError):
+            _realtime_session_id("../bad")
 
     def test_examples_include_one_fixture_per_supported_language(self):
         examples = _load_examples()
@@ -79,6 +92,49 @@ class UiCallbackInputTests(unittest.TestCase):
 
 
 class UiCallbackSmokeTests(unittest.TestCase):
+    def test_transcribe_callback_accepts_numpy_audio(self):
+        import numpy as np
+
+        from qwen_asr.server import app
+
+        class FakeResponse:
+            status_code = 200
+            text = '{"text":"ok"}'
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        original_client = app.httpx.Client
+        app.httpx.Client = FakeClient
+        try:
+            transcript, details, status = app.transcribe_openai(
+                (16000, np.zeros((8000,), dtype=np.float32)),
+                None,
+                "Upload",
+                "qwen3-asr",
+                "Auto",
+                "json",
+                "",
+                [],
+                "http://127.0.0.1:8000",
+            )
+        finally:
+            app.httpx.Client = original_client
+
+        self.assertEqual(transcript, "ok")
+        self.assertIn('"text": "ok"', details)
+        self.assertIn("HTTP 200", status)
+
     def test_transcribe_callback_accepts_filedata_dict(self):
         from qwen_asr.server import app
 
@@ -100,6 +156,9 @@ class UiCallbackSmokeTests(unittest.TestCase):
                 return FakeResponse()
 
         with tempfile.NamedTemporaryFile(suffix=".wav") as audio_file:
+            audio_file.write(b"RIFF....WAVE")
+            audio_file.flush()
+
             original_client = app.httpx.Client
             app.httpx.Client = FakeClient
             try:

@@ -8,7 +8,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable
+from typing import Any, Dict, Iterable
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
@@ -18,10 +18,6 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_audios, normalize_language_name, validate_language
 from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
-
-if TYPE_CHECKING:
-    from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
-
 
 MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
 RESPONSE_FORMATS = {"json", "text", "verbose_json", "srt", "vtt"}

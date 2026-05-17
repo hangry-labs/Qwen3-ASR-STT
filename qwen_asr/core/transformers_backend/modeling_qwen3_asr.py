@@ -718,7 +718,7 @@ class Qwen3ASRAudioEncoder(Qwen3ASRPreTrainedModel):
         hidden_states = padded_embed[padded_mask_after_cnn]
         cu_chunk_lens = [0]
         window_aftercnn = padded_mask_after_cnn.shape[-1] * (self.n_window_infer // (self.n_window * 2))
-        for cnn_len in aftercnn_lens:
+        for cnn_len in aftercnn_lens.tolist():
             cu_chunk_lens += [window_aftercnn] * (cnn_len // window_aftercnn)
             remainder = cnn_len % window_aftercnn
             if remainder != 0:
@@ -1187,6 +1187,9 @@ class Qwen3ASRThinkerForConditionalGeneration(Qwen3ASRPreTrainedModelForConditio
             (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
         """
 
+        if audio_feature_lengths is None and feature_attention_mask is not None:
+            audio_feature_lengths = torch.sum(feature_attention_mask, dim=1)
+
         if inputs_embeds is None:
             # 1. Extract the input embeddings
             inputs_embeds = self.get_input_embeddings()(input_ids)
@@ -1201,11 +1204,6 @@ class Qwen3ASRThinkerForConditionalGeneration(Qwen3ASRPreTrainedModelForConditio
             audio_features = audio_features.to(inputs_embeds.device, inputs_embeds.dtype)
             audio_mask = self.get_placeholder_mask(input_ids, inputs_embeds=inputs_embeds)
             inputs_embeds = inputs_embeds.masked_scatter(audio_mask, audio_features)
-
-        if feature_attention_mask is not None:
-            audio_feature_lengths = torch.sum(feature_attention_mask, dim=1)
-        else:
-            audio_feature_lengths = None
 
         if attention_mask is not None and position_ids is None:
             if (

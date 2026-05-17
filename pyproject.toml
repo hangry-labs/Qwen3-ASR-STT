@@ -49,6 +49,9 @@ Homepage = "https://github.com/hangry-labs/Qwen3-ASR-STT"
 Repository = "https://github.com/hangry-labs/Qwen3-ASR-STT"
 "Upstream Project" = "https://github.com/QwenLM/Qwen3-ASR"
 
+[project.entry-points."vllm.general_plugins"]
+qwen_asr = "qwen_asr.vllm_plugin:register"
+
 [tool.setuptools]
 packages = { find = { where = ["."] , include = ["qwen_asr*"] } }
 include-package-data = true
