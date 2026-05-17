@@ -141,7 +141,6 @@ def main() -> int:
     log_startup("docker entrypoint started")
     host = os.getenv("HOST", "0.0.0.0")
     port = os.getenv("PORT", "8000")
-    app_mode = os.getenv("QWEN_ASR_APP", "demo").strip().lower()
     backend = os.getenv("QWEN_ASR_BACKEND", "vllm")
     asr_model = os.getenv("QWEN_ASR_MODEL", "Qwen/Qwen3-ASR-1.7B")
     aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", "")
@@ -154,39 +153,25 @@ def main() -> int:
     resolved_aligner_kwargs = json.loads(aligner_kwargs_value[0]) if aligner_kwargs_value else None
 
     log_startup(
-        f"configuration resolved: app={app_mode} model={asr_model} backend={backend} "
+        f"configuration resolved: model={asr_model} backend={backend} "
         f"host={host} port={port} concurrency={concurrency} backend_kwargs={backend_kwargs}"
     )
-    if app_mode in {"api", "openai", "server"}:
-        with StartupTimer("import OpenAI-compatible API server"):
-            from qwen_asr.server.openai_api import run_server as run_openai_api
+    with StartupTimer("import combined Gradio UI/OpenAI API server"):
+        from qwen_asr.server.app import run_server as run_ui
 
-        run_openai_api(
-            asr_checkpoint=asr_model,
-            backend=backend,
-            backend_kwargs=backend_kwargs,
-            cuda_visible_devices=cuda_visible_devices,
-            host=host,
-            port=int(port),
-            concurrency=int(concurrency),
-        )
-    else:
-        with StartupTimer("import Gradio UI server"):
-            from qwen_asr.server.app import run_server as run_ui
-
-        run_ui(
-            asr_checkpoint=asr_model,
-            aligner_checkpoint=aligner_model
-            if _enabled(os.getenv("QWEN_ASR_ENABLE_ALIGNER"), default=False) and aligner_model
-            else None,
-            backend=backend,
-            backend_kwargs=backend_kwargs,
-            aligner_kwargs=resolved_aligner_kwargs,
-            cuda_visible_devices=cuda_visible_devices,
-            host=host,
-            port=int(port),
-            concurrency=int(concurrency),
-        )
+    run_ui(
+        asr_checkpoint=asr_model,
+        aligner_checkpoint=aligner_model
+        if _enabled(os.getenv("QWEN_ASR_ENABLE_ALIGNER"), default=False) and aligner_model
+        else None,
+        backend=backend,
+        backend_kwargs=backend_kwargs,
+        aligner_kwargs=resolved_aligner_kwargs,
+        cuda_visible_devices=cuda_visible_devices,
+        host=host,
+        port=int(port),
+        concurrency=int(concurrency),
+    )
     return 0
 
 

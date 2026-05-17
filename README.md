@@ -186,11 +186,12 @@ Known GGUF assets are tracked for future runtime work, but this service currentl
 
 ## Runtime Settings
 
+Every container starts the combined Gradio UI and OpenAI-compatible API on the same port.
+
 Common environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `QWEN_ASR_APP` | `demo` | `demo` runs UI plus API; `api` runs API only |
 | `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-1.7B` | ASR model ID |
 | `QWEN_ASR_BACKEND` | `vllm` | Runtime backend |
 | `QWEN_ASR_ENABLE_ALIGNER` | `0` | Load forced aligner for timestamp output |
@@ -240,7 +241,7 @@ task localrun
 task logs
 ```
 
-Run API-only profiles:
+Run benchmark model profiles:
 
 ```bash
 task deploy-api-17b

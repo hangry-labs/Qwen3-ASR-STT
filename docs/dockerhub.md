@@ -156,14 +156,7 @@ docker run --rm -p 8000:8000 --gpus all \
   hangrylabs/qwen3-asr-stt:latest
 ```
 
-Run API-only mode:
-
-```bash
-docker run --rm -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e QWEN_ASR_APP=api \
-  hangrylabs/qwen3-asr-stt:latest
-```
+Each container starts the Gradio UI and OpenAI-compatible API together on port 8000.
 
 Enable timestamp output through the forced aligner:
 
@@ -176,7 +169,6 @@ docker run --rm -p 8000:8000 --gpus all \
 
 Common knobs:
 
-- `QWEN_ASR_APP=demo|api`
 - `QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B`
 - `QWEN_ASR_ENABLE_ALIGNER=0|1`
 - `QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53`
