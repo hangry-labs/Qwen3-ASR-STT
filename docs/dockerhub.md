@@ -13,8 +13,8 @@ This Hangry Labs image is built for private local inference. Run the container, 
 - Browser UI for file upload, recording, realtime microphone transcription, API status, and GPU visibility
 - OpenAI-compatible `POST /v1/audio/transcriptions`
 - Local realtime transcription session endpoints used by the UI
-- Qwen3-ASR 1.7B default model
-- Optional Qwen3-ASR 0.6B runtime configuration
+- Qwen3-ASR 0.6B default model
+- Optional Qwen3-ASR 1.7B runtime configuration
 - Optional forced aligner support for timestamp output
 - Python 3.13 runtime with locked dependencies
 - vLLM backend by default
@@ -107,6 +107,8 @@ curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
   -F "response_format=verbose_json"
 ```
 
+When `language` is omitted, Qwen3-ASR performs model-native language identification. The Whisper component in the image is the Qwen audio feature extractor, not a separate language detector switch.
+
 Use the OpenAI Python client:
 
 ```python
@@ -143,16 +145,20 @@ The realtime session API is local and experimental. It is used by the browser UI
 Default model:
 
 ```text
-Qwen/Qwen3-ASR-1.7B
+Qwen/Qwen3-ASR-0.6B
 ```
 
-Run the smaller 0.6B model:
+Run the larger 1.7B model:
 
 ```bash
 docker run --rm -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
-  -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-0.6B \
-  -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.38 \
+  -e HF_HUB_OFFLINE=0 \
+  -e TRANSFORMERS_OFFLINE=0 \
+  -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B \
+  -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53 \
+  -e QWEN_ASR_MAX_MODEL_LEN=4096 \
+  -e QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048 \
   hangrylabs/qwen3-asr-stt:latest
 ```
 
@@ -169,10 +175,11 @@ docker run --rm -p 8000:8000 --gpus all \
 
 Common knobs:
 
-- `QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B`
+- `QWEN_ASR_MODEL=Qwen/Qwen3-ASR-0.6B`
 - `QWEN_ASR_ENABLE_ALIGNER=0|1`
-- `QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53`
-- `QWEN_ASR_MAX_MODEL_LEN=4096`
+- `QWEN_ASR_GPU_MEMORY_UTILIZATION=0.22`
+- `QWEN_ASR_MAX_MODEL_LEN=2048`
+- `QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048`
 - `QWEN_ASR_MAX_NEW_TOKENS=512`
 - `QWEN_ASR_PERFORMANCE_PROFILE=balanced|throughput|custom`
 

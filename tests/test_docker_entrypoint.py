@@ -10,10 +10,11 @@ from unittest.mock import patch
 
 
 BASE_ENV = {
-    "QWEN_ASR_MAX_MODEL_LEN": "4096",
-    "QWEN_ASR_GPU_MEMORY_UTILIZATION": "0.38",
+    "QWEN_ASR_MAX_MODEL_LEN": "2048",
+    "QWEN_ASR_GPU_MEMORY_UTILIZATION": "0.22",
     "QWEN_ASR_MAX_INFERENCE_BATCH_SIZE": "2",
     "QWEN_ASR_MAX_NEW_TOKENS": "512",
+    "QWEN_ASR_MAX_NUM_BATCHED_TOKENS": "2048",
     "QWEN_ASR_GENERATION_CONFIG": "vllm",
     "QWEN_ASR_LOAD_FORMAT": "safetensors",
     "QWEN_ASR_KV_CACHE_DTYPE": "auto",
@@ -64,6 +65,17 @@ ENTRYPOINT = _load_entrypoint_module()
 
 
 class DockerEntrypointProfileTests(unittest.TestCase):
+    def test_backend_kwargs_default_to_lean_06b_profile(self):
+        with patch.dict(os.environ, {}, clear=True):
+            kwargs = ENTRYPOINT._backend_kwargs()
+
+        self.assertEqual(kwargs["max_model_len"], 2048)
+        self.assertEqual(kwargs["gpu_memory_utilization"], 0.22)
+        self.assertEqual(kwargs["max_inference_batch_size"], 2)
+        self.assertEqual(kwargs["max_new_tokens"], 512)
+        self.assertEqual(kwargs["max_num_batched_tokens"], 2048)
+        self.assertEqual(kwargs["compilation_config"]["cudagraph_mode"], "PIECEWISE")
+
     def test_balanced_profile_supplies_bounded_piecewise_defaults(self):
         with patch.dict(os.environ, {**BASE_ENV, "QWEN_ASR_PERFORMANCE_PROFILE": "balanced"}, clear=True):
             kwargs = ENTRYPOINT._backend_kwargs()
@@ -71,6 +83,7 @@ class DockerEntrypointProfileTests(unittest.TestCase):
         self.assertEqual(kwargs["compilation_config"]["cudagraph_mode"], "PIECEWISE")
         self.assertEqual(kwargs["compilation_config"]["cudagraph_capture_sizes"], [1, 2])
         self.assertEqual(kwargs["compilation_config"]["max_cudagraph_capture_size"], 2)
+        self.assertEqual(kwargs["max_num_batched_tokens"], 2048)
 
     def test_throughput_profile_omits_graph_overrides_even_when_low_level_env_is_set(self):
         env = {
@@ -99,6 +112,36 @@ class DockerEntrypointProfileTests(unittest.TestCase):
         self.assertEqual(kwargs["compilation_config"]["cudagraph_capture_sizes"], [1, 2, 4])
         self.assertEqual(kwargs["compilation_config"]["max_cudagraph_capture_size"], 4)
 
+    def test_main_uses_06b_runtime_defaults_when_env_is_unset(self):
+        captured = {}
+        fake_package = ModuleType("qwen_asr")
+        fake_package.__path__ = []
+        fake_server = ModuleType("qwen_asr.server")
+        fake_server.__path__ = []
+        fake_app = ModuleType("qwen_asr.server.app")
+
+        def fake_run_server(**kwargs):
+            captured.update(kwargs)
+
+        fake_app.run_server = fake_run_server
+
+        with patch.dict(os.environ, {}, clear=True), patch.dict(
+            sys.modules,
+            {
+                "qwen_asr": fake_package,
+                "qwen_asr.server": fake_server,
+                "qwen_asr.server.app": fake_app,
+            },
+        ):
+            self.assertEqual(ENTRYPOINT.main(), 0)
+
+        self.assertEqual(captured["asr_checkpoint"], "Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(captured["backend"], "vllm")
+        self.assertEqual(captured["concurrency"], 2)
+        self.assertEqual(captured["backend_kwargs"]["max_model_len"], 2048)
+        self.assertEqual(captured["backend_kwargs"]["gpu_memory_utilization"], 0.22)
+        self.assertEqual(captured["backend_kwargs"]["max_num_batched_tokens"], 2048)
+
     def test_main_ignores_legacy_api_mode_and_starts_combined_server(self):
         captured = {}
         fake_package = ModuleType("qwen_asr")
@@ -119,7 +162,7 @@ class DockerEntrypointProfileTests(unittest.TestCase):
             "QWEN_ASR_ALIGNER_MODEL": "Qwen/Qwen3-ForcedAligner-0.6B",
             "QWEN_ASR_ENABLE_ALIGNER": "1",
             "QWEN_ASR_CONCURRENCY": "2",
-            "CUDA_VISIBLE_DEVICES": "1",
+            "CUDA_VISIBLE_DEVICES": "0",
             "HOST": "127.0.0.1",
             "PORT": "8123",
         }

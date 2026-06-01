@@ -7,6 +7,15 @@ from typing import Any
 from qwen_asr.startup_logging import StartupTimer, log_startup
 
 
+DEFAULT_ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
+DEFAULT_CONCURRENCY = "2"
+DEFAULT_MAX_MODEL_LEN = 2048
+DEFAULT_GPU_MEMORY_UTILIZATION = 0.22
+DEFAULT_MAX_INFERENCE_BATCH_SIZE = 2
+DEFAULT_MAX_NEW_TOKENS = 512
+DEFAULT_MAX_NUM_BATCHED_TOKENS = 2048
+
+
 def _enabled(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
@@ -20,17 +29,17 @@ def _json_arg(value: str | None) -> list[str]:
     return [value]
 
 
-def _int_env(name: str) -> int | None:
+def _int_env(name: str, default: int | None = None) -> int | None:
     value = os.getenv(name)
     if not value or not value.strip():
-        return None
+        return default
     return int(value)
 
 
-def _float_env(name: str) -> float | None:
+def _float_env(name: str, default: float | None = None) -> float | None:
     value = os.getenv(name)
     if not value or not value.strip():
-        return None
+        return default
     return float(value)
 
 
@@ -51,21 +60,25 @@ def _str_env(name: str) -> str | None:
 def _backend_kwargs() -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
 
-    max_model_len = _int_env("QWEN_ASR_MAX_MODEL_LEN")
+    max_model_len = _int_env("QWEN_ASR_MAX_MODEL_LEN", DEFAULT_MAX_MODEL_LEN)
     if max_model_len is not None:
         kwargs["max_model_len"] = max_model_len
 
-    gpu_memory_utilization = _float_env("QWEN_ASR_GPU_MEMORY_UTILIZATION")
+    gpu_memory_utilization = _float_env("QWEN_ASR_GPU_MEMORY_UTILIZATION", DEFAULT_GPU_MEMORY_UTILIZATION)
     if gpu_memory_utilization is not None:
         kwargs["gpu_memory_utilization"] = gpu_memory_utilization
 
-    max_inference_batch_size = _int_env("QWEN_ASR_MAX_INFERENCE_BATCH_SIZE")
+    max_inference_batch_size = _int_env("QWEN_ASR_MAX_INFERENCE_BATCH_SIZE", DEFAULT_MAX_INFERENCE_BATCH_SIZE)
     if max_inference_batch_size is not None:
         kwargs["max_inference_batch_size"] = max_inference_batch_size
 
-    max_new_tokens = _int_env("QWEN_ASR_MAX_NEW_TOKENS")
+    max_new_tokens = _int_env("QWEN_ASR_MAX_NEW_TOKENS", DEFAULT_MAX_NEW_TOKENS)
     if max_new_tokens is not None:
         kwargs["max_new_tokens"] = max_new_tokens
+
+    max_num_batched_tokens = _int_env("QWEN_ASR_MAX_NUM_BATCHED_TOKENS", DEFAULT_MAX_NUM_BATCHED_TOKENS)
+    if max_num_batched_tokens is not None:
+        kwargs["max_num_batched_tokens"] = max_num_batched_tokens
 
     generation_config = _str_env("QWEN_ASR_GENERATION_CONFIG")
     if generation_config is not None:
@@ -87,7 +100,7 @@ def _backend_kwargs() -> dict[str, Any]:
     if enforce_eager is not None:
         kwargs["enforce_eager"] = enforce_eager
 
-    performance_profile = (os.getenv("QWEN_ASR_PERFORMANCE_PROFILE", "custom") or "custom").strip().lower()
+    performance_profile = (os.getenv("QWEN_ASR_PERFORMANCE_PROFILE", "balanced") or "balanced").strip().lower()
     if performance_profile not in {"balanced", "throughput", "custom"}:
         raise ValueError(
             "QWEN_ASR_PERFORMANCE_PROFILE must be one of: balanced, throughput, custom"
@@ -142,10 +155,10 @@ def main() -> int:
     host = os.getenv("HOST", "0.0.0.0")
     port = os.getenv("PORT", "8000")
     backend = os.getenv("QWEN_ASR_BACKEND", "vllm")
-    asr_model = os.getenv("QWEN_ASR_MODEL", "Qwen/Qwen3-ASR-1.7B")
+    asr_model = os.getenv("QWEN_ASR_MODEL", DEFAULT_ASR_MODEL)
     aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", "")
     cuda_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES", "0")
-    concurrency = os.getenv("QWEN_ASR_CONCURRENCY", "16")
+    concurrency = os.getenv("QWEN_ASR_CONCURRENCY", DEFAULT_CONCURRENCY)
     aligner_kwargs = os.getenv("QWEN_ASR_ALIGNER_KWARGS")
 
     backend_kwargs = _backend_kwargs()

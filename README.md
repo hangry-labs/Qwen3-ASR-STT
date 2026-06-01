@@ -46,7 +46,7 @@ Health check:
 curl http://localhost:8000/health
 ```
 
-The full `latest` image is intended to include the Qwen3-ASR runtime assets needed for offline-friendly use after the image is pulled. Runtime defaults use the 1.7B model, vLLM, a 4096-token model context, deterministic decoding, and offline Hugging Face/Transformers flags.
+The full `latest` image is intended to include the Qwen3-ASR runtime assets needed for offline-friendly use after the image is pulled. Runtime defaults use the 0.6B model, vLLM, a 2048-token model context, deterministic decoding, and offline Hugging Face/Transformers flags.
 
 ## Tiny Image
 
@@ -122,6 +122,8 @@ curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
   -F "response_format=text"
 ```
 
+When `language` is omitted, the service keeps Qwen3-ASR in model-native auto-language mode. The Whisper component in this image is the Qwen audio feature extractor, not a separate language detector that can be enabled or disabled.
+
 ### Python OpenAI Client
 
 ```python
@@ -158,13 +160,13 @@ print(result.text)
 Default full image model:
 
 ```text
-Qwen/Qwen3-ASR-1.7B
+Qwen/Qwen3-ASR-0.6B
 ```
 
-Alternative supported ASR model:
+Larger supported ASR model:
 
 ```text
-Qwen/Qwen3-ASR-0.6B
+Qwen/Qwen3-ASR-1.7B
 ```
 
 Optional forced aligner asset:
@@ -192,21 +194,27 @@ Common environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-1.7B` | ASR model ID |
+| `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-0.6B` | ASR model ID |
 | `QWEN_ASR_BACKEND` | `vllm` | Runtime backend |
 | `QWEN_ASR_ENABLE_ALIGNER` | `0` | Load forced aligner for timestamp output |
 | `QWEN_ASR_CONCURRENCY` | `2` | Gradio/API server concurrency target |
-| `QWEN_ASR_GPU_MEMORY_UTILIZATION` | `0.53` | vLLM GPU memory budget for the default 1.7B profile |
-| `QWEN_ASR_MAX_MODEL_LEN` | `4096` | vLLM max model context |
+| `QWEN_ASR_GPU_MEMORY_UTILIZATION` | `0.22` | vLLM GPU memory budget for the default 0.6B profile |
+| `QWEN_ASR_MAX_MODEL_LEN` | `2048` | vLLM max model context |
+| `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM batch-token cap |
 | `QWEN_ASR_MAX_INFERENCE_BATCH_SIZE` | `2` | ASR inference batch cap |
 | `QWEN_ASR_MAX_NEW_TOKENS` | `512` | Max generated tokens |
 | `QWEN_ASR_PERFORMANCE_PROFILE` | `balanced` | Startup/runtime graph profile |
 | `VLLM_CACHE_ROOT` | `/app/.cache/vllm` | vLLM/Torch compile cache path |
 
-For the 0.6B model, the tested GPU memory utilization target is lower:
+For the 1.7B model, increase the memory/context profile:
 
 ```bash
--e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-0.6B -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.38
+-e HF_HUB_OFFLINE=0 \
+-e TRANSFORMERS_OFFLINE=0 \
+-e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B \
+-e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53 \
+-e QWEN_ASR_MAX_MODEL_LEN=4096 \
+-e QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048
 ```
 
 Decoding temperature is intentionally fixed at `0` for deterministic transcription. Do not increase it for normal STT use.

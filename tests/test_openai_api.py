@@ -99,6 +99,17 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(asr.calls[0]["context"], "domain vocabulary")
         self.assertFalse(asr.calls[0]["return_time_stamps"])
 
+    def test_omitted_language_keeps_model_native_auto_detection(self):
+        asr = FakeASR()
+        response = _client(asr).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={"model": "qwen3-asr", "response_format": "json"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(asr.calls[0]["language"])
+
     def test_text_srt_and_vtt_response_formats(self):
         client = _client()
 

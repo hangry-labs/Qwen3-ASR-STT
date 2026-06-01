@@ -5,10 +5,11 @@ import os
 from huggingface_hub import snapshot_download
 
 
-DEFAULT_ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
+DEFAULT_ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
 DEFAULT_ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
 KNOWN_MODEL_CHOICES = {
     "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B",
+    "qwen3-asr-0.6b": "Qwen/Qwen3-ASR-0.6B",
     "qwen3-asr-1.7b-gguf": "ggml-org/Qwen3-ASR-1.7B-GGUF",
     "qwen3-asr-0.6b-q4-k-m": "OpenVoiceOS/qwen3-asr-0.6b-q4-k-m",
 }
