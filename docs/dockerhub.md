@@ -20,6 +20,7 @@ This Hangry Labs image is built for private local inference. Run the container, 
 - vLLM backend by default
 - Offline-friendly full image after pull
 - Tiny image variant for persistent model-cache workflows
+- Full image includes both `Qwen/Qwen3-ASR-0.6B` and `Qwen/Qwen3-ASR-1.7B`
 
 ## Browser UI
 
@@ -40,7 +41,11 @@ The UI supports normal transcription and realtime microphone transcription. It a
 Run with NVIDIA GPU support:
 
 ```bash
-docker run --rm -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 hangrylabs/qwen3-asr-stt:latest
+docker volume create qwen3_asr_stt_vllm_cache
+docker run --rm -p 8000:8000 --gpus all \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
+  hangrylabs/qwen3-asr-stt:latest
 ```
 
 Then open:
@@ -66,6 +71,8 @@ http://localhost:8000/docs
 Use `latest_tiny` when you want runtime dependencies but prefer model assets to live in a persistent cache volume:
 
 ```bash
+docker volume create qwen3_asr_stt_hf_cache
+docker volume create qwen3_asr_stt_vllm_cache
 docker run --rm -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=0 \
@@ -75,7 +82,7 @@ docker run --rm -p 8000:8000 --gpus all \
   hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
-The tiny image downloads model assets on first online use, then reuses the mounted cache volume.
+The tiny image downloads model assets on first online use, then reuses the mounted cache volumes.
 
 ## Image Tags
 
@@ -148,17 +155,21 @@ Default model:
 Qwen/Qwen3-ASR-0.6B
 ```
 
+The full `latest` image also bakes `Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B`, so both supported ASR models are available after pull without a Hugging Face download.
+
 Run the larger 1.7B model:
 
 ```bash
+docker volume create qwen3_asr_stt_vllm_cache
 docker run --rm -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
-  -e HF_HUB_OFFLINE=0 \
-  -e TRANSFORMERS_OFFLINE=0 \
+  -e HF_HUB_OFFLINE=1 \
+  -e TRANSFORMERS_OFFLINE=1 \
   -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B \
   -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53 \
   -e QWEN_ASR_MAX_MODEL_LEN=4096 \
   -e QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048 \
+  -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
   hangrylabs/qwen3-asr-stt:latest
 ```
 
@@ -167,9 +178,11 @@ Each container starts the Gradio UI and OpenAI-compatible API together on port 8
 Enable timestamp output through the forced aligner:
 
 ```bash
+docker volume create qwen3_asr_stt_vllm_cache
 docker run --rm -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e QWEN_ASR_ENABLE_ALIGNER=1 \
+  -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
   hangrylabs/qwen3-asr-stt:latest
 ```
 
@@ -184,8 +197,22 @@ Common knobs:
 - `QWEN_ASR_STARTUP_WARMUP=1`
 - `QWEN_ASR_STARTUP_WARMUP_TOKENS=512`
 - `QWEN_ASR_PERFORMANCE_PROFILE=balanced|throughput|custom`
+- `VLLM_CACHE_ROOT=/app/.cache/vllm`
 
 Decoding temperature is fixed at `0` for deterministic transcription. Startup warmup intentionally makes `/health` wait until the normal decode path is ready, so the first API transcription after readiness does not pay vLLM's lazy generation cost.
+
+Mount `/app/.cache/vllm` to a trusted persistent volume to reuse vLLM/Torch compile artifacts across container starts. This does not preserve loaded GPU memory, CUDA graph state, KV cache allocations, or warmup decode state.
+
+If you use a persistent Hugging Face cache volume with the full image, seed it from the baked image for offline deployments:
+
+```bash
+docker volume create qwen3_asr_stt_hf_cache
+docker run --rm \
+  --entrypoint sh \
+  -v qwen3_asr_stt_hf_cache:/hf-cache \
+  hangrylabs/qwen3-asr-stt:latest \
+  -c "test -d /app/.cache/huggingface/hub && mkdir -p /hf-cache && cp -an /app/.cache/huggingface/. /hf-cache/"
+```
 
 ## Responsible Use and Privacy
 
