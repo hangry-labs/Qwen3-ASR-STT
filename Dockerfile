@@ -29,11 +29,14 @@ FROM base AS baked-builder
 ARG QWEN_ASR_PREFETCH_MODELS=Qwen/Qwen3-ASR-0.6B,Qwen/Qwen3-ASR-1.7B
 ARG QWEN_ASR_PREFETCH_ALLOW_PATTERNS=
 ARG QWEN_ASR_PREFETCH_ALIGNER=1
+ARG QWEN_ASR_REQUIRED_MODELS=Qwen/Qwen3-ASR-0.6B,Qwen/Qwen3-ASR-1.7B
 ENV QWEN_ASR_PREFETCH_MODELS=${QWEN_ASR_PREFETCH_MODELS} \
     QWEN_ASR_PREFETCH_ALLOW_PATTERNS=${QWEN_ASR_PREFETCH_ALLOW_PATTERNS} \
-    QWEN_ASR_PREFETCH_ALIGNER=${QWEN_ASR_PREFETCH_ALIGNER}
+    QWEN_ASR_PREFETCH_ALIGNER=${QWEN_ASR_PREFETCH_ALIGNER} \
+    QWEN_ASR_REQUIRED_MODELS=${QWEN_ASR_REQUIRED_MODELS}
 
-RUN python -u -m qwen_asr.prefetch_assets
+RUN python -u -m qwen_asr.prefetch_assets \
+    && python -c "import os, pathlib, sys; root=pathlib.Path(os.getenv('HF_HOME','/app/.cache/huggingface'))/'hub'; required=[model.strip() for model in os.getenv('QWEN_ASR_REQUIRED_MODELS','').replace(';', ',').split(',') if model.strip()]; missing=[model for model in required if not any((root / ('models--' + model.replace('/', '--')) / 'snapshots').glob('*'))]; print('Validated baked ASR model assets:', ', '.join(required) if required else '(none)'); print('Missing baked ASR model assets:', ', '.join(missing), file=sys.stderr) if missing else None; sys.exit(1 if missing else 0)"
 
 FROM python:3.13-slim AS runtime-base
 

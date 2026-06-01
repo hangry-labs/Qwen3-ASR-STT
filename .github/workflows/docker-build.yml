@@ -25,7 +25,7 @@ on:
       prefetch_models:
         description: "Model IDs to bake into the image"
         required: false
-        default: "Qwen/Qwen3-ASR-1.7B"
+        default: "Qwen/Qwen3-ASR-0.6B,Qwen/Qwen3-ASR-1.7B"
         type: string
       prefetch_allow_patterns:
         description: "Optional Hugging Face allow patterns for filtered model downloads"
@@ -40,7 +40,7 @@ on:
 
 env:
   IMAGE_NAME: hangrylabs/qwen3-asr-stt
-  DEFAULT_PREFETCH_MODELS: Qwen/Qwen3-ASR-1.7B
+  DEFAULT_PREFETCH_MODELS: Qwen/Qwen3-ASR-0.6B,Qwen/Qwen3-ASR-1.7B
 
 permissions:
   contents: read
