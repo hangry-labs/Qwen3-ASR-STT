@@ -203,6 +203,8 @@ Common environment variables:
 | `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM batch-token cap |
 | `QWEN_ASR_MAX_INFERENCE_BATCH_SIZE` | `2` | ASR inference batch cap |
 | `QWEN_ASR_MAX_NEW_TOKENS` | `512` | Max generated tokens |
+| `QWEN_ASR_STARTUP_WARMUP` | `1` | Run a decode warmup before the service reports healthy |
+| `QWEN_ASR_STARTUP_WARMUP_TOKENS` | `512` | Token cap used by startup warmup |
 | `QWEN_ASR_PERFORMANCE_PROFILE` | `balanced` | Startup/runtime graph profile |
 | `VLLM_CACHE_ROOT` | `/app/.cache/vllm` | vLLM/Torch compile cache path |
 

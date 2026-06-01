@@ -610,7 +610,7 @@ def run_server(
 
     warmup_enabled = os.getenv("QWEN_ASR_STARTUP_WARMUP", "0").strip().lower() in {"1", "true", "yes", "y"}
     if warmup_enabled:
-        warmup_tokens = int(os.getenv("QWEN_ASR_STARTUP_WARMUP_TOKENS", "1"))
+        warmup_tokens = int(os.getenv("QWEN_ASR_STARTUP_WARMUP_TOKENS", os.getenv("QWEN_ASR_MAX_NEW_TOKENS", "512")))
         with StartupTimer(f"startup ASR warmup max_new_tokens={warmup_tokens}"):
             asr.warm_up(max_new_tokens=warmup_tokens)
 

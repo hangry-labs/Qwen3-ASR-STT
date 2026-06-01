@@ -36,6 +36,32 @@ AutoProcessor.register(Qwen3ASRConfig, Qwen3ASRProcessor)
 def _trace_requests_enabled() -> bool:
     return os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "y"}
 
+
+def _resolve_stop_token_ids(processor: Any) -> List[int]:
+    tokenizer = getattr(processor, "tokenizer", None)
+    if tokenizer is None:
+        return []
+
+    token_ids: List[int] = []
+    for token in ("<|im_end|>", "<|endoftext|>"):
+        try:
+            token_id = tokenizer.convert_tokens_to_ids(token)
+        except Exception:
+            continue
+        if isinstance(token_id, int) and token_id >= 0 and token_id not in token_ids:
+            token_ids.append(token_id)
+
+    eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    if isinstance(eos_token_id, int) and eos_token_id >= 0 and eos_token_id not in token_ids:
+        token_ids.append(eos_token_id)
+
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if isinstance(pad_token_id, int) and pad_token_id >= 0 and pad_token_id not in token_ids:
+        token_ids.append(pad_token_id)
+
+    return token_ids
+
+
 from .qwen3_forced_aligner import Qwen3ForcedAligner
 from .utils import (
     MAX_ASR_INPUT_SECONDS,
@@ -291,7 +317,12 @@ class Qwen3ASRModel:
         # ASR/translation must remain deterministic: preserve the upstream
         # explicit zero-temperature sampling instead of falling back to model
         # generation config defaults.
-        sampling_params = SamplingParams(temperature=0.0, max_tokens=max_new_tokens)
+        stop_token_ids = _resolve_stop_token_ids(processor)
+        sampling_kwargs: Dict[str, Any] = {"temperature": 0.0, "max_tokens": max_new_tokens}
+        if stop_token_ids:
+            sampling_kwargs["stop_token_ids"] = stop_token_ids
+            log_startup(f"vLLM stop_token_ids: {stop_token_ids}")
+        sampling_params = SamplingParams(**sampling_kwargs)
 
         forced_aligner_model = None
         if forced_aligner is not None:
@@ -333,7 +364,14 @@ class Qwen3ASRModel:
 
         sampling_cls = type(original_sampling_params)
         try:
-            self.sampling_params = sampling_cls(temperature=0.0, max_tokens=max(1, int(max_new_tokens)))
+            sampling_kwargs: Dict[str, Any] = {
+                "temperature": 0.0,
+                "max_tokens": max(1, int(max_new_tokens)),
+            }
+            stop_token_ids = getattr(original_sampling_params, "stop_token_ids", None)
+            if stop_token_ids:
+                sampling_kwargs["stop_token_ids"] = list(stop_token_ids)
+            self.sampling_params = sampling_cls(**sampling_kwargs)
             silence = np.zeros((SAMPLE_RATE // 2,), dtype=np.float32)
             self.transcribe(audio=(silence, SAMPLE_RATE), language="English", return_time_stamps=False)
         finally:

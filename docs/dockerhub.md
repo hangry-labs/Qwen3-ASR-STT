@@ -181,9 +181,11 @@ Common knobs:
 - `QWEN_ASR_MAX_MODEL_LEN=2048`
 - `QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048`
 - `QWEN_ASR_MAX_NEW_TOKENS=512`
+- `QWEN_ASR_STARTUP_WARMUP=1`
+- `QWEN_ASR_STARTUP_WARMUP_TOKENS=512`
 - `QWEN_ASR_PERFORMANCE_PROFILE=balanced|throughput|custom`
 
-Decoding temperature is fixed at `0` for deterministic transcription.
+Decoding temperature is fixed at `0` for deterministic transcription. Startup warmup intentionally makes `/health` wait until the normal decode path is ready, so the first API transcription after readiness does not pay vLLM's lazy generation cost.
 
 ## Responsible Use and Privacy
 
