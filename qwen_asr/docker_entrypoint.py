@@ -154,6 +154,9 @@ def main() -> int:
     log_startup("docker entrypoint started")
     host = os.getenv("HOST", "0.0.0.0")
     port = os.getenv("PORT", "8000")
+    ssl_certfile = _str_env("QWEN_ASR_SSL_CERTFILE") or _str_env("SSL_CERTFILE")
+    ssl_keyfile = _str_env("QWEN_ASR_SSL_KEYFILE") or _str_env("SSL_KEYFILE")
+    ssl_verify = _enabled(os.getenv("QWEN_ASR_SSL_VERIFY"), default=True)
     backend = os.getenv("QWEN_ASR_BACKEND", "vllm")
     asr_model = os.getenv("QWEN_ASR_MODEL", DEFAULT_ASR_MODEL)
     aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", "")
@@ -183,6 +186,9 @@ def main() -> int:
         cuda_visible_devices=cuda_visible_devices,
         host=host,
         port=int(port),
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
+        ssl_verify=ssl_verify,
         concurrency=int(concurrency),
     )
     return 0

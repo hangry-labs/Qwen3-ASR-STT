@@ -36,6 +36,8 @@ http://localhost:8000
 
 The UI supports normal transcription and realtime microphone transcription. It also includes a GPU card so local VRAM and utilization are visible while testing.
 
+Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
+
 ## Quick Start
 
 Run with NVIDIA GPU support:
@@ -198,6 +200,8 @@ Common knobs:
 - `QWEN_ASR_STARTUP_WARMUP_TOKENS=512`
 - `QWEN_ASR_PERFORMANCE_PROFILE=balanced|throughput|custom`
 - `VLLM_CACHE_ROOT=/app/.cache/vllm`
+- `QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem`
+- `QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem`
 
 Decoding temperature is fixed at `0` for deterministic transcription. Startup warmup intentionally makes `/health` wait until the normal decode path is ready, so the first API transcription after readiness does not pay vLLM's lazy generation cost.
 
@@ -212,6 +216,17 @@ docker run --rm \
   -v qwen3_asr_stt_hf_cache:/hf-cache \
   hangrylabs/qwen3-asr-stt:latest \
   -c "test -d /app/.cache/huggingface/hub && mkdir -p /hf-cache && cp -an /app/.cache/huggingface/. /hf-cache/"
+```
+
+To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
+
+```bash
+docker run --rm -p 8000:8000 --gpus all \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem \
+  -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem \
+  -v /path/to/certs:/certs:ro \
+  hangrylabs/qwen3-asr-stt:latest
 ```
 
 ## Responsible Use and Privacy

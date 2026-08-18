@@ -98,6 +98,8 @@ The included UI is meant for practical local testing:
 
 The Stream tab uses local realtime transcription sessions backed by Qwen3-ASR vLLM streaming state. It is not a full OpenAI Realtime WebSocket implementation.
 
+Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
+
 ## OpenAI-Compatible API
 
 The main integration target is the local OpenAI-compatible transcription API.
@@ -215,6 +217,8 @@ Common environment variables:
 | `QWEN_ASR_STARTUP_WARMUP_TOKENS` | `512` | Token cap used by startup warmup |
 | `QWEN_ASR_PERFORMANCE_PROFILE` | `balanced` | Startup/runtime graph profile |
 | `VLLM_CACHE_ROOT` | `/app/.cache/vllm` | vLLM/Torch compile cache path |
+| `QWEN_ASR_SSL_CERTFILE` | unset | HTTPS certificate file path inside the container |
+| `QWEN_ASR_SSL_KEYFILE` | unset | HTTPS private key file path inside the container |
 
 For the 1.7B model, increase the memory/context profile:
 
@@ -247,6 +251,17 @@ docker run --rm \
   -v qwen3_asr_stt_hf_cache:/hf-cache \
   hangrylabs/qwen3-asr-stt:latest \
   -c "test -d /app/.cache/huggingface/hub && mkdir -p /hf-cache && cp -an /app/.cache/huggingface/. /hf-cache/"
+```
+
+To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
+
+```bash
+docker run --rm -p 8000:8000 --gpus all \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem \
+  -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem \
+  -v /path/to/certs:/certs:ro \
+  hangrylabs/qwen3-asr-stt:latest
 ```
 
 ## Local Development

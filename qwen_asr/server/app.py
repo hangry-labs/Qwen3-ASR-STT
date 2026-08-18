@@ -786,7 +786,10 @@ def run_server(
     ssl_keyfile: str | None = None,
     ssl_verify: bool = True,
 ) -> None:
-    del share, ssl_certfile, ssl_keyfile, ssl_verify
+    del share, ssl_verify
+
+    if bool(ssl_certfile) != bool(ssl_keyfile):
+        raise ValueError("Both SSL certfile and SSL keyfile must be provided to enable HTTPS.")
 
     log_startup("Gradio OpenAI-backed UI startup entered")
     if cuda_visible_devices.strip():
@@ -845,5 +848,12 @@ def run_server(
     with StartupTimer("mount Gradio UI"):
         app = gr.mount_gradio_app(app, demo, path="/")
 
-    log_startup(f"starting UI/API uvicorn on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    uvicorn_kwargs: Dict[str, Any] = {}
+    scheme = "http"
+    if ssl_certfile and ssl_keyfile:
+        scheme = "https"
+        uvicorn_kwargs["ssl_certfile"] = ssl_certfile
+        uvicorn_kwargs["ssl_keyfile"] = ssl_keyfile
+
+    log_startup(f"starting UI/API uvicorn on {scheme}://{host}:{port}")
+    uvicorn.run(app, host=host, port=port, **uvicorn_kwargs)
