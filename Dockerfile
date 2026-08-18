@@ -71,6 +71,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     QWEN_ASR_MAX_CUDAGRAPH_CAPTURE_SIZE=2 \
     QWEN_ASR_STARTUP_WARMUP=1 \
     QWEN_ASR_STARTUP_WARMUP_TOKENS=512 \
+    QWEN_ASR_INFERENCE_TIMEOUT_SECONDS=120 \
+    QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS=120 \
+    QWEN_ASR_REALTIME_SESSION_TTL_SECONDS=900 \
+    QWEN_ASR_RECYCLE_DELAY_SECONDS=2 \
+    QWEN_ASR_WATCHDOG_ENABLED=1 \
+    QWEN_ASR_WATCHDOG_INTERVAL_SECONDS=300 \
+    QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS=60 \
     QWEN_ASR_TRACE_REQUESTS=0 \
     PORT=8000 \
     HOST=0.0.0.0
@@ -82,6 +89,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=2 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4).read()"]
 
 CMD ["python", "-u", "-m", "qwen_asr.docker_entrypoint"]
 

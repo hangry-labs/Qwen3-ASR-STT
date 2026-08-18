@@ -4,7 +4,6 @@ from __future__ import annotations
 import html
 import io
 import json
-import mimetypes
 import os
 import re
 import time
@@ -369,24 +368,10 @@ def transcribe_openai(
 
 def _audio_file_payload(audio_value: Any) -> tuple[str, bytes, str] | None:
     wav_payload = _wav_bytes_from_audio_chunk(audio_value)
-    if wav_payload is not None:
-        audio_bytes, _duration = wav_payload
-        return "audio.wav", audio_bytes, "audio/wav"
-
-    audio_path = _audio_path_from_gradio(audio_value)
-    if not audio_path:
+    if wav_payload is None:
         return None
-
-    path = Path(audio_path)
-    try:
-        audio_bytes = path.read_bytes()
-    except OSError:
-        return None
-    if not audio_bytes:
-        return None
-
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return path.name or "audio", audio_bytes, mime
+    audio_bytes, _duration = wav_payload
+    return "audio.wav", audio_bytes, "audio/wav"
 
 
 def _wav_bytes_from_audio_chunk(audio_chunk: Any) -> tuple[bytes, float] | None:

@@ -26,7 +26,7 @@ Run the full baked image with NVIDIA GPU support:
 
 ```bash
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
   hangrylabs/qwen3-asr-stt:latest
@@ -61,7 +61,7 @@ The tiny image keeps runtime dependencies but does not bake model assets. Use it
 ```bash
 docker volume create qwen3_asr_stt_hf_cache
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=0 \
   -e TRANSFORMERS_OFFLINE=0 \
@@ -153,7 +153,10 @@ print(result.text)
 
 ### Supported Routes
 
-- `GET /health`
+- `GET /health` (readiness-compatible alias)
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /metrics/inference`
 - `GET /v1/models`
 - `GET /v1/models/{model}`
 - `POST /v1/audio/transcriptions`
@@ -207,7 +210,7 @@ Common environment variables:
 | `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-0.6B` | ASR model ID |
 | `QWEN_ASR_BACKEND` | `vllm` | Runtime backend |
 | `QWEN_ASR_ENABLE_ALIGNER` | `0` | Load forced aligner for timestamp output |
-| `QWEN_ASR_CONCURRENCY` | `2` | Gradio/API server concurrency target |
+| `QWEN_ASR_CONCURRENCY` | `2` | Maximum admitted inference requests (one active engine call plus queue) |
 | `QWEN_ASR_GPU_MEMORY_UTILIZATION` | `0.22` | vLLM GPU memory budget for the default 0.6B profile |
 | `QWEN_ASR_MAX_MODEL_LEN` | `2048` | vLLM max model context |
 | `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM batch-token cap |
@@ -215,16 +218,24 @@ Common environment variables:
 | `QWEN_ASR_MAX_NEW_TOKENS` | `512` | Max generated tokens |
 | `QWEN_ASR_STARTUP_WARMUP` | `1` | Run a decode warmup before the service reports healthy |
 | `QWEN_ASR_STARTUP_WARMUP_TOKENS` | `512` | Token cap used by startup warmup |
+| `QWEN_ASR_INFERENCE_TIMEOUT_SECONDS` | `120` | Deadline before readiness fails and the process recycles |
+| `QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS` | `120` | Maximum wait for the single engine owner |
+| `QWEN_ASR_REALTIME_SESSION_TTL_SECONDS` | `900` | Idle realtime session expiry |
+| `QWEN_ASR_WATCHDOG_ENABLED` | `1` | Probe auto-language inference before readiness and periodically afterward |
+| `QWEN_ASR_WATCHDOG_INTERVAL_SECONDS` | `300` | Watchdog interval |
+| `QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS` | `60` | Watchdog inference deadline |
 | `QWEN_ASR_PERFORMANCE_PROFILE` | `balanced` | Startup/runtime graph profile |
 | `VLLM_CACHE_ROOT` | `/app/.cache/vllm` | vLLM/Torch compile cache path |
 | `QWEN_ASR_SSL_CERTFILE` | unset | HTTPS certificate file path inside the container |
 | `QWEN_ASR_SSL_KEYFILE` | unset | HTTPS private key file path inside the container |
 
+Inference is serialized through one owner because the offline vLLM object is synchronous. A timeout or fatal engine worker/IPC error changes readiness to HTTP 503 and terminates the process after logging diagnostics. Keep `--restart unless-stopped`, or equivalent orchestrator supervision, enabled so a clean vLLM engine is created automatically. `/health/live` remains a cheap HTTP liveness check; `/health/ready` and `/health` report inference admission state.
+
 For the 1.7B model, increase the memory/context profile:
 
 ```bash
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=1 \
   -e TRANSFORMERS_OFFLINE=1 \
@@ -256,7 +267,7 @@ docker run --rm \
 To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
 
 ```bash
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem \
   -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem \

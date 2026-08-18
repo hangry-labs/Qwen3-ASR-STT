@@ -5,10 +5,12 @@ import asyncio
 import json
 import os
 import tempfile
+import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Callable, Dict, Iterable
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
@@ -17,6 +19,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_audios, normalize_language_name, validate_language
+from qwen_asr.server.inference_runtime import (
+    DEFAULT_INFERENCE_TIMEOUT_SECONDS,
+    DEFAULT_QUEUE_TIMEOUT_SECONDS,
+    InferenceCoordinator,
+    InferenceTimeoutError,
+    InferenceUnavailableError,
+    schedule_process_recycle,
+)
 from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
 
 MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
@@ -110,7 +120,10 @@ def _openai_error_response(
 
 def _openai_http_exception(exc: HTTPException) -> JSONResponse:
     detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
-    return _openai_error_response(message=detail, status_code=exc.status_code)
+    response = _openai_error_response(message=detail, status_code=exc.status_code)
+    if exc.headers:
+        response.headers.update(exc.headers)
+    return response
 
 
 def _form_string(form: Any, name: str, default: str = "") -> str:
@@ -301,6 +314,9 @@ class _RealtimeSession:
     language: str | None
     prompt: str
     chunk_size_sec: float
+    created_monotonic: float
+    updated_monotonic: float
+    status: str = "active"
 
 
 def _realtime_payload(session_id: str, state: Any, *, final: bool) -> dict[str, Any]:
@@ -313,6 +329,27 @@ def _realtime_payload(session_id: str, state: Any, *, final: bool) -> dict[str, 
         "chunk_id": int(getattr(state, "chunk_id", 0)),
         "final": final,
     }
+
+
+def _streaming_append_requires_inference(state: Any, chunk: Any) -> bool:
+    buffer = getattr(state, "buffer", None)
+    chunk_size_samples = getattr(state, "chunk_size_samples", None)
+    if buffer is None or chunk_size_samples is None:
+        return True
+    return len(buffer) + len(chunk) >= int(chunk_size_samples)
+
+
+def _streaming_finish_requires_inference(state: Any) -> bool:
+    buffer = getattr(state, "buffer", None)
+    return buffer is None or len(buffer) > 0
+
+
+def _inference_http_exception(exc: InferenceUnavailableError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=f"Inference service is unavailable: {exc}",
+        headers={"Retry-After": "5"},
+    )
 
 
 def _coerce_special_types(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -333,10 +370,152 @@ def create_app(
     model_name: str,
     concurrency: int,
     trace_requests: bool = False,
+    inference_timeout_seconds: float | None = None,
+    queue_timeout_seconds: float | None = None,
+    realtime_session_ttl_seconds: float | None = None,
+    recycle_process: Callable[[str], None] | None = None,
+    enable_watchdog: bool | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Qwen3-ASR OpenAI-compatible API")
-    semaphore = asyncio.Semaphore(max(1, int(concurrency)))
     realtime_sessions: dict[str, _RealtimeSession] = {}
+    inference_timeout = float(
+        inference_timeout_seconds
+        if inference_timeout_seconds is not None
+        else os.getenv("QWEN_ASR_INFERENCE_TIMEOUT_SECONDS", DEFAULT_INFERENCE_TIMEOUT_SECONDS)
+    )
+    queue_timeout = float(
+        queue_timeout_seconds
+        if queue_timeout_seconds is not None
+        else os.getenv("QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS", DEFAULT_QUEUE_TIMEOUT_SECONDS)
+    )
+    session_ttl = float(
+        realtime_session_ttl_seconds
+        if realtime_session_ttl_seconds is not None
+        else os.getenv("QWEN_ASR_REALTIME_SESSION_TTL_SECONDS", "900")
+    )
+    recycle_delay = float(os.getenv("QWEN_ASR_RECYCLE_DELAY_SECONDS", "2"))
+    watchdog_enabled = (
+        enable_watchdog
+        if enable_watchdog is not None
+        else os.getenv("QWEN_ASR_WATCHDOG_ENABLED", "1").strip().lower() in {"1", "true", "yes", "y"}
+    )
+    watchdog_interval = max(1.0, float(os.getenv("QWEN_ASR_WATCHDOG_INTERVAL_SECONDS", "300")))
+    watchdog_timeout = max(0.001, float(os.getenv("QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS", "60")))
+    default_watchdog_audio = Path(__file__).resolve().parents[2] / "testbench/assets/english/random/01.mp3"
+    watchdog_audio = Path(os.getenv("QWEN_ASR_WATCHDOG_AUDIO", str(default_watchdog_audio)))
+
+    def session_diagnostics() -> dict[str, Any]:
+        now = time.monotonic()
+        return {
+            "realtime_sessions": [
+                {
+                    "session_id": session_id,
+                    "status": session.status,
+                    "age_seconds": round(now - session.created_monotonic, 3),
+                    "idle_seconds": round(now - session.updated_monotonic, 3),
+                    "lock_active": session.lock.locked(),
+                }
+                for session_id, session in realtime_sessions.items()
+            ]
+        }
+
+    recycler = recycle_process or (lambda reason: schedule_process_recycle(reason, recycle_delay))
+    coordinator = InferenceCoordinator(
+        model_name=model_name,
+        capacity=concurrency,
+        inference_timeout_seconds=inference_timeout,
+        queue_timeout_seconds=queue_timeout,
+        recycle_process=recycler,
+        diagnostics_provider=session_diagnostics,
+    )
+    cleanup_task: asyncio.Task[Any] | None = None
+    watchdog_task: asyncio.Task[Any] | None = None
+
+    def purge_expired_sessions() -> None:
+        now = time.monotonic()
+        expired = [
+            session_id
+            for session_id, session in realtime_sessions.items()
+            if not session.lock.locked() and now - session.updated_monotonic >= session_ttl
+        ]
+        for session_id in expired:
+            session = realtime_sessions.pop(session_id, None)
+            if session is not None:
+                session.status = "expired"
+
+    async def cleanup_sessions() -> None:
+        interval = max(1.0, min(60.0, session_ttl))
+        while True:
+            await asyncio.sleep(interval)
+            purge_expired_sessions()
+
+    async def run_watchdog_probe() -> None:
+        await coordinator.run(
+            "watchdog",
+            asr.transcribe,
+            audio=str(watchdog_audio),
+            context="",
+            language=None,
+            return_time_stamps=False,
+            language_mode="auto",
+            deadline_seconds=watchdog_timeout,
+        )
+
+    async def inference_watchdog() -> None:
+        await asyncio.sleep(watchdog_interval)
+        while True:
+            readiness = await coordinator.snapshot()
+            if readiness["status"] != "ok":
+                return
+            if readiness["active_inference"] == 0 and readiness["queued_inference"] == 0:
+                try:
+                    await run_watchdog_probe()
+                except InferenceUnavailableError as exc:
+                    if str(exc) != "inference_capacity_exhausted":
+                        return
+                except Exception:
+                    await coordinator.mark_degraded("watchdog_failure")
+                    return
+            await asyncio.sleep(watchdog_interval)
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI):
+        nonlocal cleanup_task, watchdog_task
+        try:
+            cleanup_task = asyncio.create_task(cleanup_sessions(), name="qwen-asr-session-cleanup")
+            if watchdog_enabled:
+                if watchdog_audio.is_file():
+                    await run_watchdog_probe()
+                    watchdog_task = asyncio.create_task(inference_watchdog(), name="qwen-asr-inference-watchdog")
+                else:
+                    raise RuntimeError(f"Inference watchdog fixture not found: {watchdog_audio}")
+            yield
+        except InferenceUnavailableError as exc:
+            raise RuntimeError(f"Startup inference readiness probe failed: {exc}") from exc
+        except Exception as exc:
+            readiness = await coordinator.snapshot()
+            if readiness["status"] == "ok":
+                await coordinator.mark_degraded("watchdog_failure")
+            raise RuntimeError("Startup inference readiness probe failed") from exc
+        finally:
+            if cleanup_task is not None:
+                cleanup_task.cancel()
+                try:
+                    await cleanup_task
+                except asyncio.CancelledError:
+                    # Expected when the application lifespan shuts down.
+                    pass
+            if watchdog_task is not None:
+                watchdog_task.cancel()
+                try:
+                    await watchdog_task
+                except asyncio.CancelledError:
+                    # Expected when the application lifespan shuts down.
+                    pass
+            coordinator.shutdown()
+
+    app = FastAPI(title="Qwen3-ASR OpenAI-compatible API", lifespan=lifespan)
+    app.state.inference_coordinator = coordinator
+    app.state.realtime_sessions = realtime_sessions
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
@@ -350,9 +529,25 @@ def create_app(
             error_type="invalid_request_error",
         )
 
-    @app.get("/health")
-    def health() -> Dict[str, Any]:
+    @app.get("/health/live")
+    def health_live() -> Dict[str, Any]:
         return {"status": "ok", "model": model_name}
+
+    async def readiness_response() -> JSONResponse:
+        payload = await coordinator.snapshot()
+        return JSONResponse(status_code=200 if payload["status"] == "ok" else 503, content=payload)
+
+    @app.get("/health/ready")
+    async def health_ready() -> JSONResponse:
+        return await readiness_response()
+
+    @app.get("/health")
+    async def health() -> JSONResponse:
+        return await readiness_response()
+
+    @app.get("/metrics/inference")
+    async def inference_metrics() -> Dict[str, Any]:
+        return await coordinator.metrics()
 
     @app.get("/v1/models")
     def models() -> Dict[str, Any]:
@@ -378,6 +573,9 @@ def create_app(
 
     @app.post("/v1/audio/transcriptions")
     async def transcriptions(request: Request):
+        readiness = await coordinator.snapshot()
+        if readiness["status"] != "ok":
+            raise _inference_http_exception(InferenceUnavailableError(readiness["reason"] or "degraded"))
         with optional_timer("transcription request", trace_requests):
             form = await request.form()
 
@@ -429,15 +627,19 @@ def create_app(
                     tmp_path = tmp.name
 
             try:
-                async with semaphore:
+                try:
                     with optional_timer("run ASR transcription", trace_requests):
-                        result = await asyncio.to_thread(
+                        result = await coordinator.run(
+                            "ordinary",
                             asr.transcribe,
                             audio=tmp_path,
                             context=prompt,
                             language=forced_language,
                             return_time_stamps=return_time_stamps,
+                            language_mode="forced" if forced_language else "auto",
                         )
+                except InferenceUnavailableError as exc:
+                    raise _inference_http_exception(exc) from exc
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
 
@@ -464,6 +666,10 @@ def create_app(
 
     @app.post("/v1/realtime/transcriptions/sessions")
     async def create_realtime_session(request: Request) -> Dict[str, Any]:
+        purge_expired_sessions()
+        readiness = await coordinator.snapshot()
+        if readiness["status"] != "ok":
+            raise _inference_http_exception(InferenceUnavailableError(readiness["reason"] or "degraded"))
         try:
             payload = await request.json()
         except json.JSONDecodeError as exc:
@@ -501,6 +707,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         session_id = f"rt_{uuid.uuid4().hex}"
+        now = time.monotonic()
         realtime_sessions[session_id] = _RealtimeSession(
             state=state,
             lock=asyncio.Lock(),
@@ -508,6 +715,8 @@ def create_app(
             language=forced_language,
             prompt=prompt,
             chunk_size_sec=chunk_size_sec,
+            created_monotonic=now,
+            updated_monotonic=now,
         )
         return {
             "id": session_id,
@@ -519,9 +728,15 @@ def create_app(
 
     @app.post("/v1/realtime/transcriptions/sessions/{session_id}/audio")
     async def append_realtime_audio(session_id: str, request: Request) -> Dict[str, Any]:
+        purge_expired_sessions()
         session = realtime_sessions.get(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Unknown realtime transcription session: {session_id}")
+        if session.status != "active":
+            raise HTTPException(status_code=409, detail=f"Realtime session is {session.status}")
+        readiness = await coordinator.snapshot()
+        if readiness["status"] != "ok":
+            raise _inference_http_exception(InferenceUnavailableError(readiness["reason"] or "degraded"))
 
         form = await request.form()
         upload = form.get("file")
@@ -543,34 +758,91 @@ def create_app(
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
+        if session.status != "active":
+            raise HTTPException(status_code=409, detail=f"Realtime session is {session.status}")
+
         async with session.lock:
-            async with semaphore:
-                try:
-                    await asyncio.to_thread(asr.streaming_transcribe, chunk, session.state)
-                except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if session.status != "active":
+                raise HTTPException(status_code=409, detail=f"Realtime session is {session.status}")
+            try:
+                if _streaming_append_requires_inference(session.state, chunk):
+                    await coordinator.run(
+                        "realtime_append",
+                        asr.streaming_transcribe,
+                        chunk,
+                        session.state,
+                        session_id=session_id,
+                        language_mode="forced" if session.language else "auto",
+                        audio_samples=len(chunk),
+                    )
+                else:
+                    asr.streaming_transcribe(chunk, session.state)
+            except InferenceTimeoutError as exc:
+                session.status = "failed"
+                raise _inference_http_exception(exc) from exc
+            except InferenceUnavailableError as exc:
+                session.status = "failed"
+                raise _inference_http_exception(exc) from exc
+            except ValueError as exc:
+                session.status = "failed"
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            finally:
+                session.updated_monotonic = time.monotonic()
 
         return _realtime_payload(session_id, session.state, final=False)
 
     @app.post("/v1/realtime/transcriptions/sessions/{session_id}/finish")
     async def finish_realtime_session(session_id: str) -> Dict[str, Any]:
+        purge_expired_sessions()
         session = realtime_sessions.get(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Unknown realtime transcription session: {session_id}")
 
+        if session.status != "active":
+            raise HTTPException(status_code=409, detail=f"Realtime session is {session.status}")
+        readiness = await coordinator.snapshot()
+        if readiness["status"] != "ok":
+            raise _inference_http_exception(InferenceUnavailableError(readiness["reason"] or "degraded"))
         async with session.lock:
-            async with semaphore:
-                try:
-                    await asyncio.to_thread(asr.finish_streaming_transcribe, session.state)
-                except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if session.status != "active":
+                raise HTTPException(status_code=409, detail=f"Realtime session is {session.status}")
+            session.status = "finishing"
+            try:
+                if _streaming_finish_requires_inference(session.state):
+                    await coordinator.run(
+                        "realtime_finish",
+                        asr.finish_streaming_transcribe,
+                        session.state,
+                        session_id=session_id,
+                        language_mode="forced" if session.language else "auto",
+                        audio_samples=len(getattr(session.state, "buffer", [])),
+                    )
+                else:
+                    asr.finish_streaming_transcribe(session.state)
+            except InferenceTimeoutError as exc:
+                session.status = "failed"
+                raise _inference_http_exception(exc) from exc
+            except InferenceUnavailableError as exc:
+                session.status = "failed"
+                raise _inference_http_exception(exc) from exc
+            except ValueError as exc:
+                session.status = "failed"
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        session.status = "finished"
         realtime_sessions.pop(session_id, None)
         return _realtime_payload(session_id, session.state, final=True)
 
     @app.delete("/v1/realtime/transcriptions/sessions/{session_id}")
     async def delete_realtime_session(session_id: str) -> Dict[str, Any]:
-        removed = realtime_sessions.pop(session_id, None)
-        return {"id": session_id, "deleted": removed is not None}
+        purge_expired_sessions()
+        session = realtime_sessions.get(session_id)
+        if session is None:
+            return {"id": session_id, "deleted": False}
+        if session.lock.locked() or session.status in {"finishing", "failed"}:
+            raise HTTPException(status_code=409, detail=f"Realtime session is {session.status}; deletion is unsafe")
+        session.status = "deleted"
+        realtime_sessions.pop(session_id, None)
+        return {"id": session_id, "deleted": True}
 
     @app.get("/v1/audio/supported_languages")
     def supported_languages() -> Dict[str, Any]:

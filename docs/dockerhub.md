@@ -44,7 +44,7 @@ Run with NVIDIA GPU support:
 
 ```bash
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
   hangrylabs/qwen3-asr-stt:latest
@@ -75,7 +75,7 @@ Use `latest_tiny` when you want runtime dependencies but prefer model assets to 
 ```bash
 docker volume create qwen3_asr_stt_hf_cache
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=0 \
   -e TRANSFORMERS_OFFLINE=0 \
@@ -137,7 +137,10 @@ print(result.text)
 
 Useful routes:
 
-- `GET /health`
+- `GET /health` (readiness-compatible alias)
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /metrics/inference`
 - `GET /v1/models`
 - `GET /v1/models/{model}`
 - `POST /v1/audio/transcriptions`
@@ -163,7 +166,7 @@ Run the larger 1.7B model:
 
 ```bash
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=1 \
   -e TRANSFORMERS_OFFLINE=1 \
@@ -181,7 +184,7 @@ Enable timestamp output through the forced aligner:
 
 ```bash
 docker volume create qwen3_asr_stt_vllm_cache
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e QWEN_ASR_ENABLE_ALIGNER=1 \
   -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
@@ -198,12 +201,20 @@ Common knobs:
 - `QWEN_ASR_MAX_NEW_TOKENS=512`
 - `QWEN_ASR_STARTUP_WARMUP=1`
 - `QWEN_ASR_STARTUP_WARMUP_TOKENS=512`
+- `QWEN_ASR_INFERENCE_TIMEOUT_SECONDS=120`
+- `QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS=120`
+- `QWEN_ASR_REALTIME_SESSION_TTL_SECONDS=900`
+- `QWEN_ASR_WATCHDOG_ENABLED=1`
+- `QWEN_ASR_WATCHDOG_INTERVAL_SECONDS=300`
+- `QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS=60`
 - `QWEN_ASR_PERFORMANCE_PROFILE=balanced|throughput|custom`
 - `VLLM_CACHE_ROOT=/app/.cache/vllm`
 - `QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem`
 - `QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem`
 
 Decoding temperature is fixed at `0` for deterministic transcription. Startup warmup intentionally makes `/health` wait until the normal decode path is ready, so the first API transcription after readiness does not pay vLLM's lazy generation cost.
+
+All API, realtime, UI, warmup, and watchdog inference shares one synchronous engine owner. If inference exceeds its deadline or the engine reports a fatal worker/IPC failure, `/health` and `/health/ready` change to HTTP 503 and the process exits after recording diagnostics. Keep the documented `--restart unless-stopped` policy, or equivalent Kubernetes/systemd supervision, so Docker starts a clean vLLM engine automatically. `/health/live` only confirms that the HTTP process is alive.
 
 Mount `/app/.cache/vllm` to a trusted persistent volume to reuse vLLM/Torch compile artifacts across container starts. This does not preserve loaded GPU memory, CUDA graph state, KV cache allocations, or warmup decode state.
 
@@ -221,7 +232,7 @@ docker run --rm \
 To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
 
 ```bash
-docker run --rm -p 8000:8000 --gpus all \
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem \
   -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem \

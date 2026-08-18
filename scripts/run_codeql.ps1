@@ -2,7 +2,8 @@ param(
     [string]$Database = ".codeql/db",
     [string]$Source = ".codeql/source",
     [string]$Sarif = ".codeql/results.sarif",
-    [string]$Suite = "codeql/python-queries:codeql-suites/python-security-and-quality.qls"
+    [string]$QueryPackVersion = "1.8.2",
+    [string]$Suite = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +30,13 @@ function Remove-CodeqlPath {
     Remove-Item -LiteralPath $Resolved -Recurse -Force
 }
 
+function Invoke-Codeql {
+    & codeql @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "CodeQL command failed with exit code ${LASTEXITCODE}: codeql $($args -join ' ')"
+    }
+}
+
 Set-Location $RepoRoot
 New-Item -ItemType Directory -Force -Path $CodeqlRoot | Out-Null
 
@@ -49,8 +57,21 @@ foreach ($File in $Files) {
     Copy-Item -LiteralPath (Join-Path $RepoRoot $File) -Destination $Destination -Force
 }
 
-codeql pack download codeql/python-queries
-codeql database create $DatabasePath --language=python --build-mode=none --source-root $SourcePath
-codeql database analyze $DatabasePath $Suite --format=sarif-latest --output=$SarifPath
+Invoke-Codeql pack download "codeql/python-queries@$QueryPackVersion"
 
-Write-Host "CodeQL SARIF written to $SarifPath"
+if (-not $Suite) {
+    $Suite = Join-Path $HOME ".codeql/packages/codeql/python-queries/$QueryPackVersion/codeql-suites/python-security-and-quality.qls"
+}
+if (-not (Test-Path -LiteralPath $Suite -PathType Leaf)) {
+    throw "CodeQL query suite not found: $Suite"
+}
+
+Invoke-Codeql database create $DatabasePath --language=python --build-mode=none --source-root $SourcePath
+Invoke-Codeql database analyze $DatabasePath $Suite --format=sarif-latest --output=$SarifPath
+
+$Results = @((Get-Content -LiteralPath $SarifPath -Raw | ConvertFrom-Json).runs[0].results)
+if ($Results.Count -gt 0) {
+    throw "CodeQL reported $($Results.Count) finding(s). Review $SarifPath."
+}
+
+Write-Host "CodeQL completed with no findings. SARIF written to $SarifPath"

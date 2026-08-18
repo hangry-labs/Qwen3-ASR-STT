@@ -13,8 +13,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
 import os
+import threading
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -195,6 +196,9 @@ class Qwen3ASRModel:
         self.forced_aligner = forced_aligner
         self.max_inference_batch_size = int(max_inference_batch_size)
         self.max_new_tokens = max_new_tokens
+        # The synchronous offline engine must have a single caller. The API
+        # also serializes whole operations; this protects direct and UI use.
+        self._generate_lock = threading.Lock()
 
         if backend == "transformers":
             self.device = getattr(model, "device", None)
@@ -207,6 +211,10 @@ class Qwen3ASRModel:
         else:
             self.device = None
             self.dtype = None
+
+    def _generate(self, *args: Any, **kwargs: Any) -> Any:
+        with self._generate_lock:
+            return self.model.generate(*args, **kwargs)
 
     @classmethod
     def from_pretrained(
@@ -594,7 +602,7 @@ class Qwen3ASRModel:
             inputs = self.processor(text=sub_text, audio=sub_wavs, return_tensors="pt", padding=True)
             inputs = inputs.to(self.model.device).to(self.model.dtype)
 
-            text_ids = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens)
+            text_ids = self._generate(**inputs, max_new_tokens=self.max_new_tokens)
 
             decoded = self.processor.batch_decode(
                 text_ids.sequences[:, inputs["input_ids"].shape[1]:],
@@ -622,7 +630,7 @@ class Qwen3ASRModel:
         outs: List[str] = []
         for batch in chunk_list(inputs, self.max_inference_batch_size):
             with optional_timer(f"vLLM generate batch size={len(batch)}", trace_requests):
-                outputs = self.model.generate(batch, sampling_params=self.sampling_params, use_tqdm=False)
+                outputs = self._generate(batch, sampling_params=self.sampling_params, use_tqdm=False)
             for o in outputs:
                 outs.append(o.outputs[0].text)
         return outs
@@ -841,7 +849,7 @@ class Qwen3ASRModel:
             # vLLM input: single item
             inp = {"prompt": prompt, "multi_modal_data": {"audio": [state.audio_accum]}}
 
-            outputs = self.model.generate([inp], sampling_params=self.sampling_params, use_tqdm=False)
+            outputs = self._generate([inp], sampling_params=self.sampling_params, use_tqdm=False)
             gen_text = outputs[0].outputs[0].text
 
             # Accumulate raw decoded (then parse to lang/text)
@@ -909,7 +917,7 @@ class Qwen3ASRModel:
         prompt = state.prompt_raw + prefix
         inp = {"prompt": prompt, "multi_modal_data": {"audio": [state.audio_accum]}}
 
-        outputs = self.model.generate([inp], sampling_params=self.sampling_params, use_tqdm=False)
+        outputs = self._generate([inp], sampling_params=self.sampling_params, use_tqdm=False)
         gen_text = outputs[0].outputs[0].text
 
         state._raw_decoded = (prefix + gen_text) if prefix is not None else gen_text

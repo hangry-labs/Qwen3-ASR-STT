@@ -135,50 +135,27 @@ class UiCallbackSmokeTests(unittest.TestCase):
         self.assertIn('"text": "ok"', details)
         self.assertIn("HTTP 200", status)
 
-    def test_transcribe_callback_accepts_filedata_dict(self):
+    def test_transcribe_callback_rejects_server_file_paths(self):
         from qwen_asr.server import app
-
-        class FakeResponse:
-            status_code = 200
-            text = '{"text":"ok"}'
-
-        class FakeClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def post(self, *args, **kwargs):
-                return FakeResponse()
 
         with tempfile.NamedTemporaryFile(suffix=".wav") as audio_file:
             audio_file.write(b"RIFF....WAVE")
             audio_file.flush()
+            transcript, details, status = app.transcribe_openai(
+                {"path": audio_file.name},
+                None,
+                "Upload",
+                "qwen3-asr",
+                "Auto",
+                "json",
+                "",
+                [],
+                "http://127.0.0.1:8000",
+            )
 
-            original_client = app.httpx.Client
-            app.httpx.Client = FakeClient
-            try:
-                transcript, details, status = app.transcribe_openai(
-                    {"path": audio_file.name},
-                    None,
-                    "Upload",
-                    "qwen3-asr",
-                    "Auto",
-                    "json",
-                    "",
-                    [],
-                    "http://127.0.0.1:8000",
-                )
-            finally:
-                app.httpx.Client = original_client
-
-        self.assertEqual(transcript, "ok")
-        self.assertIn('"text": "ok"', details)
-        self.assertIn("HTTP 200", status)
+        self.assertEqual(transcript, "")
+        self.assertEqual(details, "")
+        self.assertEqual(status, "Upload audio input is invalid.")
 
 
 if __name__ == "__main__":
