@@ -8,5 +8,4 @@ include MANIFEST.in
 include pyproject.toml
 
 prune assets
-prune examples
 prune qwen_asr.egg-info

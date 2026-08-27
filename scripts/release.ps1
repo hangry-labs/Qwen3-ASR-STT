@@ -168,7 +168,7 @@ Invoke-Step "Run release validation" {
         if (-not (Test-Path -LiteralPath $venvPython)) {
             throw "Release validation requires $venvPython."
         }
-        Invoke-Native "Python compilation" { & $venvPython -m compileall -q qwen_asr tests testbench examples }
+        Invoke-Native "Python compilation" { & $venvPython -m compileall -q qwen_asr tests testbench }
         Invoke-Native "CodeQL analysis" { task codeql }
         Invoke-Native "Dockerfile validation" { docker build --check . }
     }

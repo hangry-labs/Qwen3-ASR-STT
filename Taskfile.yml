@@ -100,7 +100,7 @@ tasks:
   compile:
     desc: Compile Python sources
     cmds:
-      - 'cmd /c ".venv\Scripts\python.exe" -m compileall -q qwen_asr testbench examples'
+      - 'cmd /c ".venv\Scripts\python.exe" -m compileall -q qwen_asr testbench'
 
   codeql:
     desc: Run CodeQL Python security-and-quality analysis
