@@ -27,6 +27,7 @@ from qwen_asr.server.inference_runtime import (
     InferenceUnavailableError,
     schedule_process_recycle,
 )
+from qwen_asr.server.startup_warmup import run_startup_warmup
 from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
 
 MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
@@ -375,6 +376,7 @@ def create_app(
     realtime_session_ttl_seconds: float | None = None,
     recycle_process: Callable[[str], None] | None = None,
     enable_watchdog: bool | None = None,
+    startup_warmup: Callable[[], Any] | None = None,
 ) -> FastAPI:
     realtime_sessions: dict[str, _RealtimeSession] = {}
     inference_timeout = float(
@@ -400,6 +402,10 @@ def create_app(
     )
     watchdog_interval = max(1.0, float(os.getenv("QWEN_ASR_WATCHDOG_INTERVAL_SECONDS", "300")))
     watchdog_timeout = max(0.001, float(os.getenv("QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS", "60")))
+    startup_warmup_timeout = max(
+        0.001,
+        float(os.getenv("QWEN_ASR_STARTUP_WARMUP_TIMEOUT_SECONDS", "600")),
+    )
     default_watchdog_audio = Path(__file__).resolve().parents[2] / "testbench/assets/english/random/01.mp3"
     watchdog_audio = Path(os.getenv("QWEN_ASR_WATCHDOG_AUDIO", str(default_watchdog_audio)))
 
@@ -482,6 +488,13 @@ def create_app(
         nonlocal cleanup_task, watchdog_task
         try:
             cleanup_task = asyncio.create_task(cleanup_sessions(), name="qwen-asr-session-cleanup")
+            if startup_warmup is not None:
+                await coordinator.run(
+                    "warmup",
+                    startup_warmup,
+                    language_mode="mixed",
+                    deadline_seconds=startup_warmup_timeout,
+                )
             if watchdog_enabled:
                 if watchdog_audio.is_file():
                     await run_watchdog_probe()
@@ -693,7 +706,7 @@ def create_app(
         prompt = str(payload.get("prompt") or "")
 
         if not hasattr(asr, "init_streaming_state"):
-            raise HTTPException(status_code=501, detail="Realtime streaming is not available for this backend")
+            raise HTTPException(status_code=501, detail="Realtime streaming is not available for this model")
 
         try:
             state = asr.init_streaming_state(
@@ -854,8 +867,7 @@ def create_app(
 def run_server(
     *,
     asr_checkpoint: str,
-    backend: str,
-    backend_kwargs: Dict[str, Any] | None,
+    model_kwargs: Dict[str, Any] | None,
     cuda_visible_devices: str,
     host: str,
     port: int,
@@ -866,25 +878,14 @@ def run_server(
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices.strip()
         log_startup(f"CUDA_VISIBLE_DEVICES set to {cuda_visible_devices.strip()}")
 
-    with StartupTimer("coerce backend kwargs"):
-        resolved_backend_kwargs = _coerce_special_types(backend_kwargs or {})
+    with StartupTimer("coerce model kwargs"):
+        resolved_model_kwargs = _coerce_special_types(model_kwargs or {})
 
     with StartupTimer("import Qwen3ASRModel"):
         from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
 
-    with StartupTimer(f"load ASR model via {backend} backend"):
-        if backend == "vllm":
-            asr = Qwen3ASRModel.LLM(asr_checkpoint, **resolved_backend_kwargs)
-        elif backend == "transformers":
-            asr = Qwen3ASRModel.from_pretrained(asr_checkpoint, **resolved_backend_kwargs)
-        else:
-            raise ValueError(f"Unsupported backend: {backend}")
-
-    warmup_enabled = os.getenv("QWEN_ASR_STARTUP_WARMUP", "0").strip().lower() in {"1", "true", "yes", "y"}
-    if warmup_enabled:
-        warmup_tokens = int(os.getenv("QWEN_ASR_STARTUP_WARMUP_TOKENS", os.getenv("QWEN_ASR_MAX_NEW_TOKENS", "512")))
-        with StartupTimer(f"startup ASR warmup max_new_tokens={warmup_tokens}"):
-            asr.warm_up(max_new_tokens=warmup_tokens)
+    with StartupTimer("load native Transformers ASR model"):
+        asr = Qwen3ASRModel.from_pretrained(asr_checkpoint, **resolved_model_kwargs)
 
     with StartupTimer("create FastAPI app"):
         trace_requests = os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "y"}
@@ -893,6 +894,7 @@ def run_server(
             model_name=asr_checkpoint,
             concurrency=concurrency,
             trace_requests=trace_requests,
+            startup_warmup=lambda: run_startup_warmup(asr),
         )
 
     log_startup(f"starting uvicorn on {host}:{port}")

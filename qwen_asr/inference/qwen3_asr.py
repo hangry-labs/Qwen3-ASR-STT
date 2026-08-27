@@ -20,18 +20,9 @@ from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
-from qwen_asr.core.transformers_backend import (
-    Qwen3ASRConfig,
-    Qwen3ASRForConditionalGeneration,
-    Qwen3ASRProcessor,
-)
-from transformers import AutoConfig, AutoModel, AutoProcessor
+from transformers import AutoModelForMultimodalLM, AutoProcessor
 
 from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
-
-AutoConfig.register("qwen3_asr", Qwen3ASRConfig)
-AutoModel.register(Qwen3ASRConfig, Qwen3ASRForConditionalGeneration)
-AutoProcessor.register(Qwen3ASRConfig, Qwen3ASRProcessor)
 
 
 def _trace_requests_enabled() -> bool:
@@ -59,10 +50,10 @@ def _resolve_stop_token_ids(processor: Any) -> List[int]:
     pad_token_id = getattr(tokenizer, "pad_token_id", None)
     if isinstance(pad_token_id, int) and pad_token_id >= 0 and pad_token_id not in token_ids:
         token_ids.append(pad_token_id)
-
     return token_ids
 
 
+from .compile_utils import compile_model_forward
 from .qwen3_forced_aligner import Qwen3ForcedAligner
 from .utils import (
     MAX_ASR_INPUT_SECONDS,
@@ -79,17 +70,6 @@ from .utils import (
     split_audio_into_chunks,
     validate_language,
 )
-
-try:
-    with StartupTimer("register custom vLLM Qwen3-ASR model"):
-        from vllm import ModelRegistry
-        ModelRegistry.register_model(
-            "Qwen3ASRForConditionalGeneration",
-            "qwen_asr.core.vllm_backend:Qwen3ASRForConditionalGeneration",
-        )
-except Exception as exc:
-    log_startup(f"custom vLLM model registration skipped: {type(exc).__name__}: {exc}")
-
 
 @dataclass
 class ASRTranscription:
@@ -167,9 +147,10 @@ class ASRStreamingState:
 
 class Qwen3ASRModel:
     """
-    Unified inference wrapper for Qwen3-ASR with two backends:
-      - Transformers backend 
-      - vLLM backend
+    Unified inference wrapper for Qwen3-ASR HF checkpoints.
+
+    vLLM is the production backend. Transformers remains available as an
+    explicit diagnostic fallback.
 
     It optionally supports time stamp output via Qwen3-ForcedAligner.
 
@@ -181,21 +162,25 @@ class Qwen3ASRModel:
 
     def __init__(
         self,
-        backend: str,
         model: Any,
         processor: Any,
-        sampling_params: Optional[Any] = None,
+        backend: str = "transformers",
+        sampling_params: Any | None = None,
         forced_aligner: Optional[Qwen3ForcedAligner] = None,
         max_inference_batch_size: int = -1,
         max_new_tokens: int = 512,
+        torch_compile_enabled: bool = False,
+        generation_cache_implementation: str | None = None,
     ):
-        self.backend = backend  # "transformers" | "vllm"
+        self.backend = backend
         self.model = model
         self.processor = processor
         self.sampling_params = sampling_params
         self.forced_aligner = forced_aligner
         self.max_inference_batch_size = int(max_inference_batch_size)
         self.max_new_tokens = max_new_tokens
+        self.torch_compile_enabled = bool(torch_compile_enabled)
+        self.generation_cache_implementation = generation_cache_implementation
         # The synchronous offline engine must have a single caller. The API
         # also serializes whole operations; this protects direct and UI use.
         self._generate_lock = threading.Lock()
@@ -213,6 +198,8 @@ class Qwen3ASRModel:
             self.dtype = None
 
     def _generate(self, *args: Any, **kwargs: Any) -> Any:
+        if self.backend == "transformers" and self.generation_cache_implementation is not None:
+            kwargs.setdefault("cache_implementation", self.generation_cache_implementation)
         with self._generate_lock:
             return self.model.generate(*args, **kwargs)
 
@@ -224,6 +211,12 @@ class Qwen3ASRModel:
         forced_aligner_kwargs: Optional[Dict[str, Any]] = None,
         max_inference_batch_size: int = 32,
         max_new_tokens: Optional[int] = 512,
+        torch_compile: bool = False,
+        torch_compile_backend: str = "inductor",
+        torch_compile_mode: str = "default",
+        torch_compile_fullgraph: bool = False,
+        torch_compile_dynamic: bool | None = None,
+        generation_cache_implementation: str | None = None,
         **kwargs,
     ) -> "Qwen3ASRModel":
         """
@@ -250,7 +243,21 @@ class Qwen3ASRModel:
         log_startup(f"Transformers backend kwargs: {kwargs}")
 
         with StartupTimer("load Transformers model"):
-            model = AutoModel.from_pretrained(pretrained_model_name_or_path, **kwargs)
+            model = AutoModelForMultimodalLM.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        model.eval()
+        log_startup(
+            "Transformers attention implementation: "
+            f"{getattr(model.config, '_attn_implementation', 'auto')}"
+        )
+        compile_enabled = compile_model_forward(
+            model,
+            enabled=torch_compile,
+            backend=torch_compile_backend,
+            mode=torch_compile_mode,
+            fullgraph=torch_compile_fullgraph,
+            dynamic=torch_compile_dynamic,
+            label="ASR model",
+        )
 
         with StartupTimer("load Transformers processor"):
             processor = AutoProcessor.from_pretrained(pretrained_model_name_or_path, fix_mistral_regex=True)
@@ -263,13 +270,14 @@ class Qwen3ASRModel:
                 )
 
         return cls(
-            backend="transformers",
             model=model,
             processor=processor,
-            sampling_params=None,
+            backend="transformers",
             forced_aligner=forced_aligner_model,
             max_inference_batch_size=max_inference_batch_size,
             max_new_tokens=max_new_tokens,
+            torch_compile_enabled=compile_enabled,
+            generation_cache_implementation=generation_cache_implementation,
         )
 
     @classmethod
@@ -279,54 +287,29 @@ class Qwen3ASRModel:
         forced_aligner: Optional[str] = None,
         forced_aligner_kwargs: Optional[Dict[str, Any]] = None,
         max_inference_batch_size: int = -1,
-        max_new_tokens: Optional[int] = 4096,
-        **kwargs,
+        max_new_tokens: int = 512,
+        **kwargs: Any,
     ) -> "Qwen3ASRModel":
-        """
-        Initialize using vLLM backend.
-
-        Import is isolated to keep vLLM optional.
-
-        Args:
-            model:
-                Model path/repo for vLLM.
-            forced_aligner:
-                Optional forced aligner model path/repo id.
-            forced_aligner_kwargs:
-                Optional kwargs forwarded to Qwen3ForcedAligner.from_pretrained(...).
-            max_inference_batch_size:
-                Batch size limit for inference. -1 means no chunking. Small values can avoid OOM.
-            max_new_tokens:
-                Maximum number of tokens to generate.
-            **kwargs:
-                Forwarded to vllm.LLM(...).
-
-        Returns:
-            Qwen3ASRModel
-
-        Raises:
-            ImportError: If vLLM is not installed.
-        """
+        """Initialize the built-in vLLM Qwen3-ASR HF implementation."""
         log_startup(f"vLLM backend kwargs: {kwargs}")
         try:
             with StartupTimer("import vLLM runtime classes"):
                 from vllm import LLM as vLLM
                 from vllm import SamplingParams
-        except Exception as e:
-            raise ImportError(
-                "vLLM is not available. Install with: pip install qwen-asr[vllm]"
-            ) from e
+        except Exception as exc:
+            raise ImportError("vLLM is not available. Install qwen-asr with vLLM support.") from exc
 
         with StartupTimer("initialize vLLM LLM"):
             llm = vLLM(model=model, **kwargs)
 
         with StartupTimer("load Qwen3-ASR processor"):
-            processor = Qwen3ASRProcessor.from_pretrained(model, fix_mistral_regex=True)
-        # ASR/translation must remain deterministic: preserve the upstream
-        # explicit zero-temperature sampling instead of falling back to model
-        # generation config defaults.
+            processor = AutoProcessor.from_pretrained(model, fix_mistral_regex=True)
+
+        sampling_kwargs: Dict[str, Any] = {
+            "temperature": 0.0,
+            "max_tokens": int(max_new_tokens),
+        }
         stop_token_ids = _resolve_stop_token_ids(processor)
-        sampling_kwargs: Dict[str, Any] = {"temperature": 0.0, "max_tokens": max_new_tokens}
         if stop_token_ids:
             sampling_kwargs["stop_token_ids"] = stop_token_ids
             log_startup(f"vLLM stop_token_ids: {stop_token_ids}")
@@ -346,7 +329,7 @@ class Qwen3ASRModel:
             sampling_params=sampling_params,
             forced_aligner=forced_aligner_model,
             max_inference_batch_size=max_inference_batch_size,
-            max_new_tokens=None,
+            max_new_tokens=max_new_tokens,
         )
 
     def get_supported_languages(self) -> List[str]:
@@ -358,34 +341,53 @@ class Qwen3ASRModel:
         """
         return list(SUPPORTED_LANGUAGES)
 
-    def warm_up(self, *, max_new_tokens: int = 1) -> None:
+    def warm_up(
+        self,
+        *,
+        max_new_tokens: int = 1,
+        iterations: int = 1,
+        audio: AudioLike | None = None,
+        aligner_text: str = "Warmup",
+    ) -> None:
         """
-        Run a minimal decode so lazy backend initialization happens before
+        Run a minimal decode so lazy model initialization happens before
         the service reports ready.
         """
-        if self.backend != "vllm":
-            return
-
+        warmup_audio: AudioLike = (
+            audio
+            if audio is not None
+            else (np.zeros((SAMPLE_RATE // 2,), dtype=np.float32), SAMPLE_RATE)
+        )
+        original_max_new_tokens = self.max_new_tokens
         original_sampling_params = self.sampling_params
-        if original_sampling_params is None:
-            return
-
-        sampling_cls = type(original_sampling_params)
         try:
-            sampling_kwargs: Dict[str, Any] = {
-                "temperature": 0.0,
-                "max_tokens": max(1, int(max_new_tokens)),
-            }
-            stop_token_ids = getattr(original_sampling_params, "stop_token_ids", None)
-            if stop_token_ids:
-                sampling_kwargs["stop_token_ids"] = list(stop_token_ids)
-            self.sampling_params = sampling_cls(**sampling_kwargs)
-            silence = np.zeros((SAMPLE_RATE // 2,), dtype=np.float32)
-            self.transcribe(audio=(silence, SAMPLE_RATE), language="English", return_time_stamps=False)
+            warmup_max_tokens = max(1, int(max_new_tokens))
+            self.max_new_tokens = warmup_max_tokens
+            if self.backend == "vllm" and original_sampling_params is not None:
+                sampling_kwargs: Dict[str, Any] = {
+                    "temperature": 0.0,
+                    "max_tokens": warmup_max_tokens,
+                }
+                stop_token_ids = getattr(original_sampling_params, "stop_token_ids", None)
+                if stop_token_ids:
+                    sampling_kwargs["stop_token_ids"] = list(stop_token_ids)
+                self.sampling_params = type(original_sampling_params)(**sampling_kwargs)
+            for iteration in range(max(1, int(iterations))):
+                # Warm both prompt shapes. Auto-language is repeated for the
+                # default three-pass profile because readiness probes use it.
+                language = None if iteration % 2 == 0 else "English"
+                self.transcribe(audio=warmup_audio, language=language, return_time_stamps=False)
+            if self.forced_aligner is not None:
+                self.forced_aligner.warm_up(
+                    audio=warmup_audio,
+                    text=aligner_text,
+                    language="English",
+                )
         finally:
+            self.max_new_tokens = original_max_new_tokens
             self.sampling_params = original_sampling_params
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def transcribe(
         self,
         audio: Union[AudioLike, List[AudioLike]],
@@ -473,7 +475,7 @@ class Qwen3ASRModel:
         chunk_ctx: List[str] = [ctxs[c.orig_index] for c in chunks]
         chunk_lang: List[Optional[str]] = [langs_norm[c.orig_index] for c in chunks]
         chunk_wavs: List[np.ndarray] = [c.wav for c in chunks]
-        with optional_timer(f"infer ASR chunks count={len(chunks)} backend={self.backend}", trace_requests):
+        with optional_timer(f"infer ASR chunks count={len(chunks)}", trace_requests):
             raw_outputs = self._infer_asr(chunk_ctx, chunk_wavs, chunk_lang)
 
         # parse outputs, prepare for optional alignment
@@ -576,10 +578,10 @@ class Qwen3ASRModel:
         Returns:
             List[str]: Raw decoded strings (one per chunk).
         """
-        if self.backend == "transformers":
-            return self._infer_asr_transformers(contexts, wavs, languages)
         if self.backend == "vllm":
             return self._infer_asr_vllm(contexts, wavs, languages)
+        if self.backend == "transformers":
+            return self._infer_asr_transformers(contexts, wavs, languages)
         raise RuntimeError(f"Unknown backend: {self.backend}")
 
     def _infer_asr_transformers(
@@ -602,10 +604,16 @@ class Qwen3ASRModel:
             inputs = self.processor(text=sub_text, audio=sub_wavs, return_tensors="pt", padding=True)
             inputs = inputs.to(self.model.device).to(self.model.dtype)
 
-            text_ids = self._generate(**inputs, max_new_tokens=self.max_new_tokens)
+            generated = self._generate(
+                **inputs,
+                max_new_tokens=self.max_new_tokens,
+                do_sample=False,
+                use_cache=True,
+            )
+            sequences = getattr(generated, "sequences", generated)
 
             decoded = self.processor.batch_decode(
-                text_ids.sequences[:, inputs["input_ids"].shape[1]:],
+                sequences[:, inputs["input_ids"].shape[1]:],
                 skip_special_tokens=True,
                 clean_up_tokenization_spaces=False,
             )
@@ -621,19 +629,48 @@ class Qwen3ASRModel:
     ) -> List[str]:
         inputs: List[Dict[str, Any]] = []
         trace_requests = _trace_requests_enabled()
-
         with optional_timer(f"build vLLM ASR prompts count={len(wavs)}", trace_requests):
-            for c, w, fl in zip(contexts, wavs, languages):
-                prompt = self._build_text_prompt(context=c, force_language=fl)
-                inputs.append({"prompt": prompt, "multi_modal_data": {"audio": [w]}})
+            for context, wav, language in zip(contexts, wavs, languages):
+                inputs.append(
+                    {
+                        "prompt": self._build_text_prompt(context=context, force_language=language),
+                        "multi_modal_data": {"audio": [wav]},
+                    }
+                )
 
-        outs: List[str] = []
+        outputs: List[str] = []
         for batch in chunk_list(inputs, self.max_inference_batch_size):
             with optional_timer(f"vLLM generate batch size={len(batch)}", trace_requests):
-                outputs = self._generate(batch, sampling_params=self.sampling_params, use_tqdm=False)
-            for o in outputs:
-                outs.append(o.outputs[0].text)
-        return outs
+                generated = self._generate(batch, sampling_params=self.sampling_params, use_tqdm=False)
+            outputs.extend(item.outputs[0].text for item in generated)
+        return outputs
+
+    def _generate_streaming_text(self, prompt: str, audio: np.ndarray) -> str:
+        if self.backend == "vllm":
+            item = {"prompt": prompt, "multi_modal_data": {"audio": [audio]}}
+            generated = self._generate([item], sampling_params=self.sampling_params, use_tqdm=False)
+            return str(generated[0].outputs[0].text)
+
+        inputs = self.processor(
+            text=[prompt],
+            audio=[audio],
+            return_tensors="pt",
+            padding=True,
+        )
+        inputs = inputs.to(self.model.device).to(self.model.dtype)
+        generated = self._generate(
+            **inputs,
+            max_new_tokens=self.max_new_tokens,
+            do_sample=False,
+            use_cache=True,
+        )
+        sequences = getattr(generated, "sequences", generated)
+        decoded = self.processor.batch_decode(
+            sequences[:, inputs["input_ids"].shape[1]:],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        return str(decoded[0])
 
     def _offset_align_result(self, result: Any, offset_sec: float) -> Any:
         """
@@ -692,7 +729,7 @@ class Qwen3ASRModel:
         Initialize streaming ASR state for a single stream.
 
         Notes:
-            - Streaming ASR is supported ONLY for vLLM backend.
+            - Streaming ASR uses repeated inference over accumulated audio through the configured backend.
             - Streaming ASR does NOT support timestamps (forced aligner is not used).
             - Batch inference is NOT supported.
 
@@ -717,12 +754,9 @@ class Qwen3ASRModel:
 
         Raises:
             ValueError:
-                - If backend is not "vllm".
                 - If chunk_size_sec <= 0.
                 - If forced language is invalid (same validation rules as transcribe()).
         """
-        if self.backend != "vllm":
-            raise ValueError("Streaming ASR is supported only for vLLM backend (backend='vllm').")
         if chunk_size_sec is None or float(chunk_size_sec) <= 0:
             raise ValueError(f"chunk_size_sec must be > 0, got: {chunk_size_sec}")
 
@@ -775,7 +809,7 @@ class Qwen3ASRModel:
                 * Else: rollback last unfixed_token_num tokens from previously accumulated decoded text.
 
         Notes:
-            - vLLM backend only.
+            - The configured inference backend is used.
             - No timestamps.
             - Single stream only (no batching).
 
@@ -791,10 +825,8 @@ class Qwen3ASRModel:
 
         Raises:
             ValueError:
-                If backend is not "vllm" or state is invalid.
+                If the state is invalid.
         """
-        if self.backend != "vllm":
-            raise ValueError("streaming_transcribe() is supported only for vLLM backend (backend='vllm').")
         if state is None:
             raise ValueError("state must not be None. Call init_streaming_state() first.")
         if pcm16k is None:
@@ -846,11 +878,7 @@ class Qwen3ASRModel:
 
             prompt = state.prompt_raw + prefix
 
-            # vLLM input: single item
-            inp = {"prompt": prompt, "multi_modal_data": {"audio": [state.audio_accum]}}
-
-            outputs = self._generate([inp], sampling_params=self.sampling_params, use_tqdm=False)
-            gen_text = outputs[0].outputs[0].text
+            gen_text = self._generate_streaming_text(prompt, state.audio_accum)
 
             # Accumulate raw decoded (then parse to lang/text)
             state._raw_decoded = (prefix + gen_text) if prefix is not None else gen_text
@@ -872,7 +900,7 @@ class Qwen3ASRModel:
         without padding. Then it updates state.language/state.text one last time.
 
         Notes:
-            - vLLM backend only.
+            - The configured inference backend is used.
             - No timestamps.
             - Single stream only.
 
@@ -885,10 +913,8 @@ class Qwen3ASRModel:
 
         Raises:
             ValueError:
-                If backend is not "vllm" or state is invalid.
+                If the state is invalid.
         """
-        if self.backend != "vllm":
-            raise ValueError("finish_streaming_transcribe() is supported only for vLLM backend (backend='vllm').")
         if state is None:
             raise ValueError("state must not be None.")
 
@@ -915,10 +941,7 @@ class Qwen3ASRModel:
             prefix = self.processor.tokenizer.decode(cur_ids[:end_idx])
 
         prompt = state.prompt_raw + prefix
-        inp = {"prompt": prompt, "multi_modal_data": {"audio": [state.audio_accum]}}
-
-        outputs = self._generate([inp], sampling_params=self.sampling_params, use_tqdm=False)
-        gen_text = outputs[0].outputs[0].text
+        gen_text = self._generate_streaming_text(prompt, state.audio_accum)
 
         state._raw_decoded = (prefix + gen_text) if prefix is not None else gen_text
         lang, txt = parse_asr_output(state._raw_decoded, user_language=state.force_language)

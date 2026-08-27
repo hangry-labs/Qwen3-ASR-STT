@@ -5,7 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_ROOT_USER_ACTION=ignore \
     HF_HOME=/app/.cache/huggingface \
-    VLLM_CACHE_ROOT=/app/.cache/vllm
+    TORCHINDUCTOR_CACHE_DIR=/app/.cache/torchinductor \
+    VLLM_CACHE_ROOT=/app/.cache/vllm \
+    CUDA_HOME=/usr/local/lib/python3.13/site-packages/nvidia/cu13
 
 WORKDIR /app
 
@@ -13,11 +15,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ffmpeg libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md LICENSE VERSION requirements.txt /app/
+COPY requirements.txt /app/
 
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 -r /app/requirements.txt
+    && python -m pip install --extra-index-url https://download.pytorch.org/whl/cu130 -r /app/requirements.txt
 
+RUN ln -sfn lib /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib64 \
+    && ln -sfn libcudart.so.13 /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib/libcudart.so
+
+COPY pyproject.toml README.md LICENSE VERSION /app/
 COPY qwen_asr /app/qwen_asr
 COPY hangrylabs /app/hangrylabs
 COPY testbench /app/testbench
@@ -26,13 +32,15 @@ RUN python -m pip install -e . --no-deps
 
 FROM base AS baked-builder
 
-ARG QWEN_ASR_PREFETCH_MODELS=Qwen/Qwen3-ASR-0.6B,Qwen/Qwen3-ASR-1.7B
+ARG QWEN_ASR_PREFETCH_MODELS=Qwen/Qwen3-ASR-0.6B-hf,Qwen/Qwen3-ASR-1.7B-hf
 ARG QWEN_ASR_PREFETCH_ALLOW_PATTERNS=
 ARG QWEN_ASR_PREFETCH_ALIGNER=1
-ARG QWEN_ASR_REQUIRED_MODELS=Qwen/Qwen3-ASR-0.6B,Qwen/Qwen3-ASR-1.7B
+ARG QWEN_ASR_ALIGNER_MODEL=Qwen/Qwen3-ForcedAligner-0.6B-hf
+ARG QWEN_ASR_REQUIRED_MODELS=Qwen/Qwen3-ASR-0.6B-hf,Qwen/Qwen3-ASR-1.7B-hf,Qwen/Qwen3-ForcedAligner-0.6B-hf
 ENV QWEN_ASR_PREFETCH_MODELS=${QWEN_ASR_PREFETCH_MODELS} \
     QWEN_ASR_PREFETCH_ALLOW_PATTERNS=${QWEN_ASR_PREFETCH_ALLOW_PATTERNS} \
     QWEN_ASR_PREFETCH_ALIGNER=${QWEN_ASR_PREFETCH_ALIGNER} \
+    QWEN_ASR_ALIGNER_MODEL=${QWEN_ASR_ALIGNER_MODEL} \
     QWEN_ASR_REQUIRED_MODELS=${QWEN_ASR_REQUIRED_MODELS}
 
 RUN python -u -m qwen_asr.prefetch_assets \
@@ -45,32 +53,37 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_ROOT_USER_ACTION=ignore \
     HF_HOME=/app/.cache/huggingface \
+    TORCHINDUCTOR_CACHE_DIR=/app/.cache/torchinductor \
     VLLM_CACHE_ROOT=/app/.cache/vllm \
+    FLASHINFER_WORKSPACE_BASE=/app/.cache/vllm \
+    CUDA_HOME=/usr/local/lib/python3.13/site-packages/nvidia/cu13 \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     TRANSFORMERS_VERBOSITY=error \
+    VLLM_USE_V2_MODEL_RUNNER=0 \
     QWEN_ASR_BACKEND=vllm \
-    QWEN_ASR_MODEL=Qwen/Qwen3-ASR-0.6B \
-    QWEN_ASR_ALIGNER_MODEL=Qwen/Qwen3-ForcedAligner-0.6B \
+    QWEN_ASR_MODEL=Qwen/Qwen3-ASR-0.6B-hf \
+    QWEN_ASR_ALIGNER_MODEL=Qwen/Qwen3-ForcedAligner-0.6B-hf \
     QWEN_ASR_ENABLE_ALIGNER=0 \
     QWEN_ASR_CONCURRENCY=2 \
-    QWEN_ASR_GPU_MEMORY_UTILIZATION=0.22 \
+    QWEN_ASR_GPU_MEMORY_UTILIZATION=0.25 \
     QWEN_ASR_MAX_MODEL_LEN=2048 \
     QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048 \
+    QWEN_ASR_MAX_NUM_SEQS=2 \
     QWEN_ASR_MAX_INFERENCE_BATCH_SIZE=2 \
     QWEN_ASR_MAX_NEW_TOKENS=512 \
+    QWEN_ASR_VLLM_DTYPE=bfloat16 \
     QWEN_ASR_GENERATION_CONFIG=vllm \
-    QWEN_ASR_LOAD_FORMAT=safetensors \
-    QWEN_ASR_KV_CACHE_DTYPE=auto \
-    QWEN_ASR_CALCULATE_KV_SCALES=0 \
-    QWEN_ASR_ENFORCE_EAGER=0 \
-    QWEN_ASR_PERFORMANCE_PROFILE=balanced \
-    QWEN_ASR_COMPILATION_MODE= \
-    QWEN_ASR_CUDAGRAPH_MODE=PIECEWISE \
-    QWEN_ASR_CUDAGRAPH_CAPTURE_SIZES=1,2 \
-    QWEN_ASR_MAX_CUDAGRAPH_CAPTURE_SIZE=2 \
+    QWEN_ASR_TRANSFORMERS_DTYPE=bfloat16 \
+    QWEN_ASR_TRANSFORMERS_DEVICE_MAP=cuda:0 \
+    QWEN_ASR_TORCH_COMPILE=1 \
+    QWEN_ASR_TORCH_COMPILE_BACKEND=inductor \
+    QWEN_ASR_TORCH_COMPILE_MODE=default \
+    QWEN_ASR_TORCH_COMPILE_FULLGRAPH=0 \
     QWEN_ASR_STARTUP_WARMUP=1 \
     QWEN_ASR_STARTUP_WARMUP_TOKENS=512 \
+    QWEN_ASR_STARTUP_WARMUP_ITERATIONS=3 \
+    QWEN_ASR_STARTUP_WARMUP_AUDIO=/app/testbench/assets/english/random/01.mp3 \
     QWEN_ASR_INFERENCE_TIMEOUT_SECONDS=120 \
     QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS=120 \
     QWEN_ASR_REALTIME_SESSION_TTL_SECONDS=900 \

@@ -35,11 +35,16 @@ import torch
 from qwen_asr import Qwen3ASRModel
 
 
-ASR_MODEL_PATH = "Qwen/Qwen3-ASR-1.7B"
-FORCED_ALIGNER_PATH = "Qwen/Qwen3-ForcedAligner-0.6B"
+ASR_MODEL_PATH = "Qwen/Qwen3-ASR-1.7B-hf"
+FORCED_ALIGNER_PATH = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
 
 URL_ZH = "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/asr_zh.wav"
 URL_EN = "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/asr_en.wav"
+TEXT_EN = (
+    "Mm. Oh, yeah, yeah. He wasn't even that big when I started listening to him, "
+    "but and his solo music didn't do overly well, but he did very well when he "
+    "started writing for other people."
+)
 
 
 def _download_audio_bytes(url: str, timeout: int = 30) -> bytes:
@@ -129,16 +134,17 @@ def main() -> None:
         ASR_MODEL_PATH,
         dtype=torch.bfloat16,
         device_map="cuda:0",
-        # attn_implementation="flash_attention_2",
+        torch_compile=True,
         forced_aligner=FORCED_ALIGNER_PATH,
         forced_aligner_kwargs=dict(
             dtype=torch.bfloat16,
             device_map="cuda:0",
-            # attn_implementation="flash_attention_2",
+            torch_compile=True,
         ),
         max_inference_batch_size=32,
         max_new_tokens=256,
     )
+    asr.warm_up(max_new_tokens=256, iterations=3, audio=URL_EN, aligner_text=TEXT_EN)
 
     test_single_url(asr)
     test_batch_mixed(asr)

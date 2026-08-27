@@ -162,7 +162,7 @@ def _client(asr: FakeASR | None = None) -> TestClient:
     return TestClient(
         create_app(
             asr=asr or FakeASR(),
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=1,
         )
     )
@@ -293,7 +293,7 @@ class OpenAIApiTests(unittest.TestCase):
     def test_retrieve_model_alias(self):
         response = _client().get("/v1/models/qwen3-asr")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["id"], "Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(response.json()["id"], "Qwen/Qwen3-ASR-0.6B-hf")
 
     def test_translation_endpoint_is_explicitly_not_ready(self):
         response = _client().post("/v1/audio/translations", files=_files(), data={"model": "qwen3-asr"})
@@ -345,7 +345,7 @@ class OpenAIApiTests(unittest.TestCase):
         asr = TrackingASR()
         app = create_app(
             asr=asr,
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=2,
             recycle_process=lambda reason: None,
             enable_watchdog=False,
@@ -376,11 +376,39 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual([response.status_code for response in responses], [200, 200])
         self.assertEqual(asr.max_active, 1)
 
+    def test_startup_warmup_runs_on_the_engine_owner_thread(self):
+        thread_ids: list[int] = []
+
+        class ThreadTrackingASR(FakeASR):
+            def transcribe(self, **kwargs):
+                thread_ids.append(threading.get_ident())
+                return super().transcribe(**kwargs)
+
+        app = create_app(
+            asr=ThreadTrackingASR(),
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
+            concurrency=1,
+            recycle_process=lambda reason: None,
+            enable_watchdog=False,
+            startup_warmup=lambda: thread_ids.append(threading.get_ident()),
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/audio/transcriptions",
+                files=_files(),
+                data={"model": "qwen3-asr"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(thread_ids), 2)
+        self.assertEqual(thread_ids[0], thread_ids[1])
+        self.assertNotEqual(thread_ids[0], threading.get_ident())
+
     def test_inference_timeout_degrades_readiness_and_rejects_later_work(self):
         recycled: list[str] = []
         app = create_app(
             asr=BlockingASR(delay=0.15),
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=2,
             inference_timeout_seconds=0.02,
             recycle_process=recycled.append,
@@ -420,7 +448,7 @@ class OpenAIApiTests(unittest.TestCase):
     def test_stale_realtime_session_expires(self):
         app = create_app(
             asr=FakeASR(),
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=1,
             realtime_session_ttl_seconds=0.01,
             recycle_process=lambda reason: None,
@@ -443,7 +471,7 @@ class OpenAIApiTests(unittest.TestCase):
         asr = FakeASR()
         app = create_app(
             asr=asr,
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=1,
             recycle_process=lambda reason: None,
             enable_watchdog=True,
@@ -462,7 +490,7 @@ class OpenAIApiTests(unittest.TestCase):
         try:
             app = create_app(
                 asr=FakeASR(),
-                model_name="Qwen/Qwen3-ASR-0.6B",
+                model_name="Qwen/Qwen3-ASR-0.6B-hf",
                 concurrency=1,
                 recycle_process=recycled.append,
                 enable_watchdog=True,
@@ -484,7 +512,7 @@ class OpenAIApiTests(unittest.TestCase):
         asr = PausingStreamingASR()
         app = create_app(
             asr=asr,
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=1,
             recycle_process=lambda reason: None,
             enable_watchdog=False,
@@ -517,7 +545,7 @@ class OpenAIApiTests(unittest.TestCase):
         asr = PausingFinishASR()
         app = create_app(
             asr=asr,
-            model_name="Qwen/Qwen3-ASR-0.6B",
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=2,
             recycle_process=lambda reason: None,
             enable_watchdog=False,

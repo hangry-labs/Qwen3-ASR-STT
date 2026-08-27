@@ -74,8 +74,8 @@ function Set-ProjectVersion {
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $root
 
-Write-Host "Release automation may create local commits and an annotated tag."
-Write-Host "It never pushes Git refs or Docker images."
+Write-Host "Release automation creates local commits and an annotated tag, then pushes them atomically."
+Write-Host "Docker images are published only by GitHub Actions."
 
 if (-not (Test-Path -LiteralPath "VERSION")) {
     throw "VERSION file is missing from the repository root."
@@ -214,9 +214,13 @@ Invoke-Step "Prepare $nextSnapshotVersion" {
     Invoke-Native "Create next snapshot commit" { git commit -m "chore: start $nextSnapshotVersion" }
 }
 
+Invoke-Step "Push main and $releaseTag atomically" {
+    Invoke-Native "Push release commits and tag" { git push --atomic origin main $releaseTag }
+}
+
 if (Test-Enabled $DryRun) {
     Write-Host "Dry run complete. No files, commits, tags, or remote refs were changed."
 } else {
-    Write-Host "Release workflow complete. No push was performed."
-    Write-Host "Review the local commits and $releaseTag before pushing them."
+    Write-Host "Release workflow complete. main and $releaseTag were pushed atomically."
+    Write-Host "GitHub Actions is responsible for publishing the release images."
 }

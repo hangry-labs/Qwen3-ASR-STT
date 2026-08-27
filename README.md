@@ -16,7 +16,8 @@ This Hangry Labs fork is built for local inference. The goal is simple: pull or 
 - Docker full image target with Qwen3-ASR assets baked or prefetched at build time
 - Docker tiny image target for persistent cache-volume workflows
 - Python 3.13 runtime with locked Linux dependencies
-- vLLM backend by default for GPU inference and realtime streaming
+- Built-in vLLM 0.26 backend for accelerated GPU inference and realtime streaming
+- Transformers 5 backend retained as an explicit diagnostic fallback
 - Benchmarks for VRAM and multilingual transcription quality
 - Inference-only project scope: no training, fine-tuning, or dataset-preparation product surface
 
@@ -25,9 +26,11 @@ This Hangry Labs fork is built for local inference. The goal is simple: pull or 
 Run the full baked image with NVIDIA GPU support:
 
 ```bash
+docker volume create qwen3_asr_stt_torch_compile_cache
 docker volume create qwen3_asr_stt_vllm_cache
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
+  -v qwen3_asr_stt_torch_compile_cache:/app/.cache/torchinductor \
   -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
   hangrylabs/qwen3-asr-stt:latest
 ```
@@ -50,9 +53,9 @@ Health check:
 curl http://localhost:8000/health
 ```
 
-The full `latest` image includes both supported Qwen3-ASR runtime assets, `Qwen/Qwen3-ASR-0.6B` and `Qwen/Qwen3-ASR-1.7B`, plus the forced-aligner asset. Runtime defaults use the 0.6B model, vLLM, a 2048-token model context, deterministic decoding, and offline Hugging Face/Transformers flags.
+The full `latest` image includes `Qwen/Qwen3-ASR-0.6B-hf`, `Qwen/Qwen3-ASR-1.7B-hf`, and `Qwen/Qwen3-ForcedAligner-0.6B-hf`. Runtime defaults use the built-in vLLM Qwen3-ASR implementation with the 0.6B model, bf16 GPU weights, bounded generation, CUDA graphs, and offline Hugging Face/Transformers flags.
 
-Mounting `qwen3_asr_stt_vllm_cache` persists vLLM/Torch compile artifacts between container starts. Keep this cache private and trusted; remove the volume if you change GPU/runtime/model settings and need a clean compile cache. A persistent Hugging Face cache volume is optional for the full image and should be seeded from the baked image if used for offline deployments.
+No model volume or network access is required after pulling the full image. A persistent Hugging Face cache volume is optional and should be seeded from the baked image before it is mounted in an offline deployment.
 
 ## Tiny Image
 
@@ -60,12 +63,14 @@ The tiny image keeps runtime dependencies but does not bake model assets. Use it
 
 ```bash
 docker volume create qwen3_asr_stt_hf_cache
+docker volume create qwen3_asr_stt_torch_compile_cache
 docker volume create qwen3_asr_stt_vllm_cache
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=0 \
   -e TRANSFORMERS_OFFLINE=0 \
   -v qwen3_asr_stt_hf_cache:/app/.cache/huggingface \
+  -v qwen3_asr_stt_torch_compile_cache:/app/.cache/torchinductor \
   -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
   hangrylabs/qwen3-asr-stt:latest_tiny
 ```
@@ -96,7 +101,7 @@ The included UI is meant for practical local testing:
   <img src="docs/ui.jpg" alt="Qwen3-ASR-STT browser UI">
 </p>
 
-The Stream tab uses local realtime transcription sessions backed by Qwen3-ASR vLLM streaming state. It is not a full OpenAI Realtime WebSocket implementation.
+The Stream tab uses local realtime transcription sessions backed by repeated inference over accumulated audio through the configured backend. It is not a full OpenAI Realtime WebSocket implementation.
 
 Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
 
@@ -173,19 +178,19 @@ print(result.text)
 Default full image model:
 
 ```text
-Qwen/Qwen3-ASR-0.6B
+Qwen/Qwen3-ASR-0.6B-hf
 ```
 
 Larger supported ASR model:
 
 ```text
-Qwen/Qwen3-ASR-1.7B
+Qwen/Qwen3-ASR-1.7B-hf
 ```
 
 Optional forced aligner asset:
 
 ```text
-Qwen/Qwen3-ForcedAligner-0.6B
+Qwen/Qwen3-ForcedAligner-0.6B-hf
 ```
 
 The forced aligner is disabled by default so it does not occupy VRAM. Enable it when timestamp output is needed:
@@ -193,11 +198,6 @@ The forced aligner is disabled by default so it does not occupy VRAM. Enable it 
 ```bash
 -e QWEN_ASR_ENABLE_ALIGNER=1
 ```
-
-Known GGUF assets are tracked for future runtime work, but this service currently runs the Hugging Face/vLLM safetensors path:
-
-- `ggml-org/Qwen3-ASR-1.7B-GGUF`
-- `OpenVoiceOS/qwen3-asr-0.6b-q4-k-m`
 
 ## Runtime Settings
 
@@ -207,43 +207,46 @@ Common environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-0.6B` | ASR model ID |
-| `QWEN_ASR_BACKEND` | `vllm` | Runtime backend |
+| `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-0.6B-hf` | ASR model ID |
+| `QWEN_ASR_BACKEND` | `vllm` | Inference backend; `transformers` is a diagnostic fallback |
 | `QWEN_ASR_ENABLE_ALIGNER` | `0` | Load forced aligner for timestamp output |
 | `QWEN_ASR_CONCURRENCY` | `2` | Maximum admitted inference requests (one active engine call plus queue) |
-| `QWEN_ASR_GPU_MEMORY_UTILIZATION` | `0.22` | vLLM GPU memory budget for the default 0.6B profile |
-| `QWEN_ASR_MAX_MODEL_LEN` | `2048` | vLLM max model context |
-| `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM batch-token cap |
 | `QWEN_ASR_MAX_INFERENCE_BATCH_SIZE` | `2` | ASR inference batch cap |
 | `QWEN_ASR_MAX_NEW_TOKENS` | `512` | Max generated tokens |
-| `QWEN_ASR_STARTUP_WARMUP` | `1` | Run a decode warmup before the service reports healthy |
+| `QWEN_ASR_GPU_MEMORY_UTILIZATION` | `0.25` | vLLM GPU-memory reservation fraction |
+| `QWEN_ASR_MAX_MODEL_LEN` | `2048` | vLLM maximum model context |
+| `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM scheduler token budget |
+| `QWEN_ASR_MAX_NUM_SEQS` | `2` | vLLM scheduler sequence cap |
+| `QWEN_ASR_VLLM_DTYPE` | `bfloat16` | vLLM model dtype |
+| `QWEN_ASR_BACKEND_KWARGS` | unset | JSON object with additional backend loader options |
+| `QWEN_ASR_TRANSFORMERS_DTYPE` | `bfloat16` | Transformers fallback and aligner dtype |
+| `QWEN_ASR_TRANSFORMERS_DEVICE_MAP` | `cuda:0` | Transformers fallback and aligner device |
+| `QWEN_ASR_TORCH_COMPILE` | `1` | Compile Transformers fallback/aligner forwards with PyTorch Inductor |
+| `QWEN_ASR_TORCH_COMPILE_BACKEND` | `inductor` | PyTorch compiler backend |
+| `QWEN_ASR_TORCH_COMPILE_MODE` | `default` | PyTorch compiler mode |
+| `QWEN_ASR_TORCH_COMPILE_FULLGRAPH` | `0` | Require the entire forward pass to compile as one graph |
+| `QWEN_ASR_STARTUP_WARMUP` | `1` | Run representative decode warmups before the service reports healthy |
 | `QWEN_ASR_STARTUP_WARMUP_TOKENS` | `512` | Token cap used by startup warmup |
+| `QWEN_ASR_STARTUP_WARMUP_ITERATIONS` | `3` | Number of startup decode passes used to compile and stabilize generation |
 | `QWEN_ASR_INFERENCE_TIMEOUT_SECONDS` | `120` | Deadline before readiness fails and the process recycles |
 | `QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS` | `120` | Maximum wait for the single engine owner |
 | `QWEN_ASR_REALTIME_SESSION_TTL_SECONDS` | `900` | Idle realtime session expiry |
 | `QWEN_ASR_WATCHDOG_ENABLED` | `1` | Probe auto-language inference before readiness and periodically afterward |
 | `QWEN_ASR_WATCHDOG_INTERVAL_SECONDS` | `300` | Watchdog interval |
 | `QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS` | `60` | Watchdog inference deadline |
-| `QWEN_ASR_PERFORMANCE_PROFILE` | `balanced` | Startup/runtime graph profile |
-| `VLLM_CACHE_ROOT` | `/app/.cache/vllm` | vLLM/Torch compile cache path |
 | `QWEN_ASR_SSL_CERTFILE` | unset | HTTPS certificate file path inside the container |
 | `QWEN_ASR_SSL_KEYFILE` | unset | HTTPS private key file path inside the container |
 
-Inference is serialized through one owner because the offline vLLM object is synchronous. A timeout or fatal engine worker/IPC error changes readiness to HTTP 503 and terminates the process after logging diagnostics. Keep `--restart unless-stopped`, or equivalent orchestrator supervision, enabled so a clean vLLM engine is created automatically. `/health/live` remains a cheap HTTP liveness check; `/health/ready` and `/health` report inference admission state.
+Inference is serialized through one owner because the offline vLLM API is synchronous. A timeout or fatal model error changes readiness to HTTP 503 and terminates the process after logging diagnostics. Keep `--restart unless-stopped`, or equivalent orchestrator supervision, enabled so the model is reloaded automatically. `/health/live` remains a cheap HTTP liveness check; `/health/ready` and `/health` report inference admission state.
 
 For the 1.7B model, increase the memory/context profile:
 
 ```bash
-docker volume create qwen3_asr_stt_vllm_cache
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=1 \
   -e TRANSFORMERS_OFFLINE=1 \
-  -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B \
-  -e QWEN_ASR_GPU_MEMORY_UTILIZATION=0.53 \
-  -e QWEN_ASR_MAX_MODEL_LEN=4096 \
-  -e QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048 \
-  -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
+  -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B-hf \
   hangrylabs/qwen3-asr-stt:latest
 ```
 
@@ -251,7 +254,7 @@ Decoding temperature is intentionally fixed at `0` for deterministic transcripti
 
 ### Cache Behavior
 
-Persistent cache volumes improve repeat startups but do not preserve GPU memory state. vLLM can reuse compile artifacts under `/app/.cache/vllm`, while model weights, CUDA graphs, KV cache allocation, and warmup decode state are recreated inside each new process.
+Persistent Hugging Face cache volumes avoid repeated model downloads with the tiny image. The vLLM cache volume reuses hardware-specific AOT graphs, TorchInductor output, and FlashInfer JIT kernels across container recreations; the separate TorchInductor volume serves the optional aligner and Transformers fallback. These caches do not preserve loaded GPU weights or live CUDA graph state, and startup profiling/warmup still runs. The full image already contains every supported model asset.
 
 The full baked image is the offline source of truth for ASR model assets. If a persistent Hugging Face cache volume is used with the full image, seed it from the baked image instead of downloading from Hugging Face:
 
@@ -327,7 +330,7 @@ task release DRY_RUN=1
 task release
 ```
 
-The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates local release commits and an annotated `vX.Y.Z` tag, then prepares the next minor snapshot. It never pushes Git commits, tags, or Docker images; reviewed tags trigger the GitHub Actions image publication workflows only after the repository owner pushes them. Use `NEXT_VERSION=0.1.1-snapshot` to override the default next-minor snapshot, or `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when runtime verification is required.
+The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates the release commit and annotated `vX.Y.Z` tag, prepares the next minor snapshot commit, then atomically pushes `main` and the release tag to `origin`. GitHub Actions remains solely responsible for publishing Docker images. Use `NEXT_VERSION=0.1.1-snapshot` to override the default next-minor snapshot, or `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when runtime verification is required.
 
 Stop containers:
 
@@ -355,6 +358,17 @@ task benchmark-transcription-06b
 The benchmark scores focus on transcription meaning. Punctuation, quote recovery, and expressive marks are counted as bonus signal rather than required exact text.
 
 ## Version History
+
+### v0.2.0 (in development)
+
+- Migrated the runtime to the upstream Hugging Face Qwen3-ASR and forced-aligner implementations.
+- Replaced the legacy checkpoints with `Qwen3-ASR-0.6B-hf`, `Qwen3-ASR-1.7B-hf`, and `Qwen3-ForcedAligner-0.6B-hf` in the offline image.
+- Replaced the deleted custom vLLM model/plugin with vLLM 0.26's maintained built-in Qwen3-ASR implementation and made it the production default.
+- Corrected a major migration regression where production inference had temporarily fallen back to native Transformers instead of the optimized graph-backed vLLM path.
+- Upgraded and locked PyTorch 2.11 CUDA 13.0, Transformers 5.14, and vLLM 0.26, including a compiler/runtime compatibility pin for FlashInfer JIT builds.
+- Restored full-and-piecewise CUDA graph execution, FlashInfer kernels, deterministic decoding, representative auto/forced-language warmups, and persistent vLLM, FlashInfer, and TorchInductor caches.
+- Reduced the 0.6B 300-file transcription benchmark from 277.136 seconds on the initial v0.2 native Transformers path to 31.497 seconds on the integrated vLLM path. This is 43% faster than the historical v0.1 result of 55.382 seconds while maintaining comparable quality at 96.05 versus 95.99.
+- Preserved realtime decoding, optional native forced alignment, serialized inference, readiness, watchdog, and process-recovery safeguards.
 
 ### v0.1.0
 
@@ -388,9 +402,9 @@ You are responsible for obtaining consent where required and for complying with 
 
 Qwen3-ASR is an upstream Qwen speech recognition model family with:
 
-- `Qwen/Qwen3-ASR-1.7B`
-- `Qwen/Qwen3-ASR-0.6B`
-- `Qwen/Qwen3-ForcedAligner-0.6B`
+- `Qwen/Qwen3-ASR-1.7B-hf`
+- `Qwen/Qwen3-ASR-0.6B-hf`
+- `Qwen/Qwen3-ForcedAligner-0.6B-hf`
 
 The ASR models support language identification and speech recognition for 30 languages plus Chinese dialect/accent categories. The forced aligner supports timestamp alignment for selected languages.
 

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES
 from qwen_asr.server.openai_api import create_app as create_openai_app
+from qwen_asr.server.startup_warmup import run_startup_warmup
 from qwen_asr.startup_logging import StartupTimer, log_startup
 from qwen_asr.web.branding import brand_css, brand_header_html
 from qwen_asr.web.gpu import gpu_monitor_html
@@ -182,7 +183,6 @@ def _get_cuda_devices() -> list[str]:
 def _get_banner_runtime_html(model_name: str, backend: str) -> str:
     version = html.escape(_read_version_file())
     model = html.escape(model_name)
-    backend_label = html.escape(backend)
     cuda_devices = _get_cuda_devices()
     if cuda_devices:
         visible = os.getenv("CUDA_VISIBLE_DEVICES", "").strip()
@@ -194,6 +194,7 @@ def _get_banner_runtime_html(model_name: str, backend: str) -> str:
         hardware = "GPUs :<br>" + "<br>".join(gpu_lines)
     else:
         hardware = "Runtime : CPU"
+    backend_label = "vLLM" if backend == "vllm" else "Transformers"
     return f"v{version} | {backend_label}<br>{model}<br>{hardware}"
 
 
@@ -760,7 +761,7 @@ def run_server(
     asr_checkpoint: str,
     aligner_checkpoint: str | None,
     backend: str,
-    backend_kwargs: Dict[str, Any] | None,
+    model_kwargs: Dict[str, Any] | None,
     aligner_kwargs: Dict[str, Any] | None,
     cuda_visible_devices: str,
     host: str,
@@ -781,7 +782,7 @@ def run_server(
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices.strip()
         log_startup(f"CUDA_VISIBLE_DEVICES set to {cuda_visible_devices.strip()}")
 
-    resolved_backend_kwargs = _coerce_special_types(backend_kwargs or {})
+    resolved_model_kwargs = _coerce_special_types(model_kwargs or {})
     resolved_aligner_kwargs = _coerce_special_types(aligner_kwargs or {})
 
     forced_aligner = aligner_checkpoint if aligner_checkpoint else None
@@ -790,28 +791,18 @@ def run_server(
         from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
 
     with StartupTimer(f"load ASR model via {backend} backend"):
-        if backend == "transformers":
-            asr = Qwen3ASRModel.from_pretrained(
-                asr_checkpoint,
-                forced_aligner=forced_aligner,
-                forced_aligner_kwargs=resolved_aligner_kwargs if forced_aligner else None,
-                **resolved_backend_kwargs,
-            )
-        elif backend == "vllm":
-            asr = Qwen3ASRModel.LLM(
-                asr_checkpoint,
-                forced_aligner=forced_aligner,
-                forced_aligner_kwargs=resolved_aligner_kwargs if forced_aligner else None,
-                **resolved_backend_kwargs,
-            )
+        if backend == "vllm":
+            loader = Qwen3ASRModel.LLM
+        elif backend == "transformers":
+            loader = Qwen3ASRModel.from_pretrained
         else:
             raise ValueError(f"Unsupported backend: {backend}")
-
-    warmup_enabled = os.getenv("QWEN_ASR_STARTUP_WARMUP", "0").strip().lower() in {"1", "true", "yes", "y"}
-    if warmup_enabled:
-        warmup_tokens = int(os.getenv("QWEN_ASR_STARTUP_WARMUP_TOKENS", os.getenv("QWEN_ASR_MAX_NEW_TOKENS", "512")))
-        with StartupTimer(f"startup ASR warmup max_new_tokens={warmup_tokens}"):
-            asr.warm_up(max_new_tokens=warmup_tokens)
+        asr = loader(
+            asr_checkpoint,
+            forced_aligner=forced_aligner,
+            forced_aligner_kwargs=resolved_aligner_kwargs if forced_aligner else None,
+            **resolved_model_kwargs,
+        )
 
     trace_requests = os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "y"}
     openai_base_url = os.getenv("QWEN_ASR_UI_OPENAI_BASE_URL", f"http://127.0.0.1:{int(port)}")
@@ -822,6 +813,7 @@ def run_server(
             model_name=asr_checkpoint,
             concurrency=concurrency,
             trace_requests=trace_requests,
+            startup_warmup=lambda: run_startup_warmup(asr),
         )
 
     if ASSET_DIR.exists():

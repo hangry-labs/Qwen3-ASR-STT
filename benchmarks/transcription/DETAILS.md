@@ -998,3 +998,203 @@ This benchmark uses the random-only testbench corpus: 30 Qwen3-ASR-supported lan
 - Expected: 今日**個**公**園**好安**靜**，我慢慢行**過條**石路。
 - Actual: 今日**个**公**园**好安**静**，我慢慢行**过条**石路。
 
+
+## 27.08.2026 18:12:06 - Qwen/Qwen3-ASR-0.6B-hf
+
+- Version: `0.2.0-snapshot`
+- Comment: `Transformers 5 native -hf tiny image`
+- Total score: `96.11%`
+- Bonus: `0.40%`
+- Total time: `277.136s`
+- Cases: `300`
+
+### Best Examples
+
+#### chinese_random_04 - 102.50%
+
+- Language: `Chinese`
+- Expected: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+- Actual: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+
+#### chinese_random_05 - 102.50%
+
+- Language: `Chinese`
+- Expected: 我不是拖延症，我只是给灵感一点自由活动时间。
+- Actual: 我不是拖延症，我只是给灵感一点自由活动时间。
+
+#### chinese_random_06 - 102.50%
+
+- Language: `Chinese`
+- Expected: **电梯到了，门一开，尴尬也一起上来了。 [sigh] 尴尬还按了最近的楼层。**
+- Actual: **电梯到了，门一开，尴尬也一起上来了。尴尬还按了最近的楼层。**
+
+### Worst Examples
+
+#### hungarian_random_03 - 70.13%
+
+- Language: `Hungarian`
+- Expected: **Ebéd** **után sétáltunk** egyet a folyó mellett.
+- Actual: **Ebből** **tanítjuk** egyet a folyó mellett.
+
+#### cantonese_random_02 - 71.25%
+
+- Language: `Cantonese`
+- Expected: 我**買**咗一杯**熱**奶茶，坐喺窗**邊聽**雨**聲**。
+- Actual: 我**买**咗一杯**热**奶茶，坐喺窗**边听**雨**声**。
+
+#### cantonese_random_06 - 71.25%
+
+- Language: `Cantonese`
+- Expected: **廚**房**傳**嚟**飯**香，大家都自然行近**張枱**。
+- Actual: **厨**房**传**嚟**饭**香，大家都自然行近**张台**。
+
+
+## 27.08.2026 18:26:22 - Qwen/Qwen3-ASR-0.6B-hf
+
+- Version: `0.2.0-snapshot`
+- Comment: ``
+- Total score: `96.11%`
+- Bonus: `0.40%`
+- Total time: `279.050s`
+- Cases: `300`
+
+### Best Examples
+
+#### chinese_random_04 - 102.50%
+
+- Language: `Chinese`
+- Expected: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+- Actual: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+
+#### chinese_random_05 - 102.50%
+
+- Language: `Chinese`
+- Expected: 我不是拖延症，我只是给灵感一点自由活动时间。
+- Actual: 我不是拖延症，我只是给灵感一点自由活动时间。
+
+#### chinese_random_06 - 102.50%
+
+- Language: `Chinese`
+- Expected: **电梯到了，门一开，尴尬也一起上来了。 [sigh] 尴尬还按了最近的楼层。**
+- Actual: **电梯到了，门一开，尴尬也一起上来了。尴尬还按了最近的楼层。**
+
+### Worst Examples
+
+#### hungarian_random_03 - 70.13%
+
+- Language: `Hungarian`
+- Expected: **Ebéd** **után sétáltunk** egyet a folyó mellett.
+- Actual: **Ebből** **tanítjuk** egyet a folyó mellett.
+
+#### cantonese_random_02 - 71.25%
+
+- Language: `Cantonese`
+- Expected: 我**買**咗一杯**熱**奶茶，坐喺窗**邊聽**雨**聲**。
+- Actual: 我**买**咗一杯**热**奶茶，坐喺窗**边听**雨**声**。
+
+#### cantonese_random_06 - 71.25%
+
+- Language: `Cantonese`
+- Expected: **廚**房**傳**嚟**飯**香，大家都自然行近**張枱**。
+- Actual: **厨**房**传**嚟**饭**香，大家都自然行近**张台**。
+
+
+## 27.08.2026 22:25:31 - Qwen/Qwen3-ASR-0.6B-hf
+
+- Version: `0.2.0-snapshot`
+- Comment: `vLLM 0.26 built-in; default CUDA graphs; integrated UI/API`
+- Total score: `96.05%`
+- Bonus: `0.41%`
+- Total time: `31.497s`
+- Cases: `300`
+
+### Best Examples
+
+#### chinese_random_04 - 102.50%
+
+- Language: `Chinese`
+- Expected: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+- Actual: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+
+#### chinese_random_05 - 102.50%
+
+- Language: `Chinese`
+- Expected: 我不是拖延症，我只是给灵感一点自由活动时间。
+- Actual: 我不是拖延症，我只是给灵感一点自由活动时间。
+
+#### chinese_random_06 - 102.50%
+
+- Language: `Chinese`
+- Expected: **电梯到了，门一开，尴尬也一起上来了。 [sigh] 尴尬还按了最近的楼层。**
+- Actual: **电梯到了，门一开，尴尬也一起上来了。尴尬还按了最近的楼层。**
+
+### Worst Examples
+
+#### hungarian_random_03 - 70.13%
+
+- Language: `Hungarian`
+- Expected: **Ebéd** **után sétáltunk** egyet a folyó mellett.
+- Actual: **Ebből** **tanítjuk** egyet a folyó mellett.
+
+#### cantonese_random_02 - 71.25%
+
+- Language: `Cantonese`
+- Expected: 我**買**咗一杯**熱**奶茶，坐喺窗**邊聽**雨**聲**。
+- Actual: 我**买**咗一杯**热**奶茶，坐喺窗**边听**雨**声**。
+
+#### cantonese_random_06 - 71.25%
+
+- Language: `Cantonese`
+- Expected: **廚**房**傳**嚟**飯**香，大家都自然行近**張枱**。
+- Actual: **厨**房**传**嚟**饭**香，大家都自然行近**张台**。
+
+
+## 27.08.2026 22:48:18 - Qwen/Qwen3-ASR-0.6B-hf
+
+- Version: `0.2.0-snapshot`
+- Comment: ``
+- Total score: `96.05%`
+- Bonus: `0.41%`
+- Total time: `32.401s`
+- Cases: `300`
+
+### Best Examples
+
+#### chinese_random_04 - 102.50%
+
+- Language: `Chinese`
+- Expected: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+- Actual: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+
+#### chinese_random_05 - 102.50%
+
+- Language: `Chinese`
+- Expected: 我不是拖延症，我只是给灵感一点自由活动时间。
+- Actual: 我不是拖延症，我只是给灵感一点自由活动时间。
+
+#### chinese_random_06 - 102.50%
+
+- Language: `Chinese`
+- Expected: **电梯到了，门一开，尴尬也一起上来了。 [sigh] 尴尬还按了最近的楼层。**
+- Actual: **电梯到了，门一开，尴尬也一起上来了。尴尬还按了最近的楼层。**
+
+### Worst Examples
+
+#### hungarian_random_03 - 70.13%
+
+- Language: `Hungarian`
+- Expected: **Ebéd** **után sétáltunk** egyet a folyó mellett.
+- Actual: **Ebből** **tanítjuk** egyet a folyó mellett.
+
+#### cantonese_random_02 - 71.25%
+
+- Language: `Cantonese`
+- Expected: 我**買**咗一杯**熱**奶茶，坐喺窗**邊聽**雨**聲**。
+- Actual: 我**买**咗一杯**热**奶茶，坐喺窗**边听**雨**声**。
+
+#### cantonese_random_06 - 71.25%
+
+- Language: `Cantonese`
+- Expected: **廚**房**傳**嚟**飯**香，大家都自然行近**張枱**。
+- Actual: **厨**房**传**嚟**饭**香，大家都自然行近**张台**。
+

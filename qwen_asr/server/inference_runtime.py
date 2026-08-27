@@ -46,7 +46,7 @@ def _log_event(event: str, **fields: Any) -> None:
 
 
 def schedule_process_recycle(reason: str, delay_seconds: float = DEFAULT_RECYCLE_DELAY_SECONDS) -> None:
-    """Terminate this process after diagnostics so supervision can rebuild vLLM."""
+    """Terminate this process after diagnostics so supervision can reload the model."""
 
     def terminate() -> None:
         delay = max(0.0, float(delay_seconds))

@@ -47,7 +47,8 @@ New-Item -ItemType Directory -Force -Path $SourcePath | Out-Null
 $Files = git ls-files --cached --modified --others --exclude-standard | Where-Object {
     $_ -ne "AGENTS.md" -and
     $_ -notlike ".ai/*" -and
-    $_ -notlike ".codeql/*"
+    $_ -notlike ".codeql/*" -and
+    (Test-Path -LiteralPath (Join-Path $RepoRoot $_) -PathType Leaf)
 }
 
 foreach ($File in $Files) {

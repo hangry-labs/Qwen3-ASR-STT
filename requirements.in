@@ -1,23 +1,26 @@
---extra-index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://download.pytorch.org/whl/cu130
 
-torch==2.9.1
-torchaudio==2.9.1
-transformers==4.57.6
-huggingface-hub==0.36.0
-vllm==0.14.0
-accelerate==1.12.0
+torch==2.11.0
+torchaudio==2.11.0
+torchvision==0.26.0
+# FlashInfer JIT compilation must use the CUDA 13.0 compiler that matches
+# PyTorch's CUDA 13.0 runtime headers.
+nvidia-cuda-nvcc==13.0.88
+nvidia-cuda-crt==13.0.88
+nvidia-nvvm==13.0.88
+transformers==5.14.1
+huggingface-hub==1.5.0
+vllm[audio]==0.26.0
+accelerate==1.14.0
 qwen-omni-utils==0.0.9
 gradio==6.14.0
-fastapi==0.124.2
-uvicorn==0.38.0
-python-multipart==0.0.20
+fastapi==0.136.3
+uvicorn==0.51.0
+python-multipart==0.0.32
 flask==3.1.2
 numpy==2.2.6
-scipy==1.16.3
+scipy==1.18.1
 librosa==0.11.0
 soundfile==0.13.1
-nagisa==0.2.11
-soynlp==0.0.493
 sox==1.5.0
 pytz==2025.2
-torch-c-dlpack-ext==0.1.5

@@ -35,7 +35,7 @@ import torch
 from qwen_asr import Qwen3ForcedAligner
 
 
-MODEL_PATH = "Qwen/Qwen3-ForcedAligner-0.6B"
+MODEL_PATH = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
 
 URL_ZH = "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/asr_zh.wav"
 URL_EN = "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-ASR-Repo/asr_en.wav"
@@ -200,8 +200,9 @@ def main() -> None:
         MODEL_PATH,
         dtype=torch.bfloat16,
         device_map="cuda:0",
-        # attn_implementation="flash_attention_2",
+        torch_compile=True,
     )
+    aligner.warm_up(audio=URL_EN, text=TEXT_EN, language="English")
 
     test_single_url(aligner)
     test_batch_url(aligner)
