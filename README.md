@@ -327,7 +327,7 @@ task release DRY_RUN=1
 task release
 ```
 
-The release task validates the package, CodeQL results, Dockerfile, full baked image, and unit tests inside that built image. It creates local release commits and an annotated `vX.Y.Z` tag, then prepares the next minor snapshot. It never pushes Git commits, tags, or Docker images; reviewed tags trigger the GitHub Actions image publication workflows only after the repository owner pushes them. Use `NEXT_VERSION=0.1.1-snapshot` to override the default next-minor snapshot, or `SKIP_VALIDATION=1` only when the same release commit has already passed the complete validation sequence.
+The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates local release commits and an annotated `vX.Y.Z` tag, then prepares the next minor snapshot. It never pushes Git commits, tags, or Docker images; reviewed tags trigger the GitHub Actions image publication workflows only after the repository owner pushes them. Use `NEXT_VERSION=0.1.1-snapshot` to override the default next-minor snapshot, or `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when runtime verification is required.
 
 Stop containers:
 

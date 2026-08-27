@@ -89,7 +89,7 @@ tasks:
   release:
     desc: Validate and tag the current release, then prepare the next snapshot
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun "{{.DRY_RUN}}" -NextVersion "{{.NEXT_VERSION}}" -SkipValidation "{{.SKIP_VALIDATION}}" -Image "{{.IMAGE}}"
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun "{{.DRY_RUN}}" -NextVersion "{{.NEXT_VERSION}}" -SkipValidation "{{.SKIP_VALIDATION}}"
 
   compile:
     desc: Compile Python sources

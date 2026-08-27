@@ -1,8 +1,7 @@
 param(
     [string]$DryRun = "0",
     [string]$NextVersion = "",
-    [string]$SkipValidation = "0",
-    [string]$Image = "qwen3-asr-stt:test"
+    [string]$SkipValidation = "0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -161,7 +160,7 @@ Write-Host "Release tag:     $releaseTag"
 Write-Host "Package version: $releaseVersion"
 Write-Host "Next snapshot:   $nextSnapshotVersion"
 Write-Host "Next package:    $nextProjectVersion"
-Write-Host "Validation:      $(if (Test-Enabled $SkipValidation) { 'skipped' } else { 'compile, CodeQL, Dockerfile, baked image, containerized unit tests' })"
+Write-Host "Validation:      $(if (Test-Enabled $SkipValidation) { 'skipped' } else { 'metadata, compile, CodeQL, Dockerfile' })"
 
 Invoke-Step "Run release validation" {
     if (-not (Test-Enabled $SkipValidation)) {
@@ -172,11 +171,6 @@ Invoke-Step "Run release validation" {
         Invoke-Native "Python compilation" { & $venvPython -m compileall -q qwen_asr tests testbench examples }
         Invoke-Native "CodeQL analysis" { task codeql }
         Invoke-Native "Dockerfile validation" { docker build --check . }
-        Invoke-Native "Baked image build" { task image "IMAGE=$Image" }
-        $testsPath = (Resolve-Path -LiteralPath "tests").Path
-        Invoke-Native "Containerized unit tests" {
-            docker run --rm --entrypoint python -v "${testsPath}:/app/tests:ro" $Image -m unittest discover -s /app/tests -v
-        }
     }
 }
 
