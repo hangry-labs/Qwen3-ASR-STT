@@ -54,7 +54,7 @@ function Invoke-Step {
 
 function Get-ProjectVersion {
     $content = Get-Content -Raw -LiteralPath "pyproject.toml"
-    $match = [regex]::Match($content, '(?m)^version = "([^"]+)"$')
+    $match = [regex]::Match($content, '(?m)^version = "([^"]+)"(?=\r?$)')
     if (-not $match.Success) {
         throw "Could not read [project].version from pyproject.toml."
     }
@@ -64,7 +64,7 @@ function Get-ProjectVersion {
 function Set-ProjectVersion {
     param([string]$Version)
     $content = Get-Content -Raw -LiteralPath "pyproject.toml"
-    $pattern = [regex]::new('(?m)^version = "[^"]+"$')
+    $pattern = [regex]::new('(?m)^version = "[^"]+"(?=\r?$)')
     $updated = $pattern.Replace($content, "version = `"$Version`"", 1)
     if ($updated -eq $content -and (Get-ProjectVersion) -ne $Version) {
         throw "Failed to update [project].version in pyproject.toml."
