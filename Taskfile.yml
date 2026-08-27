@@ -86,6 +86,11 @@ tasks:
       - cmd /c task --version
       - cmd /c git status --short
 
+  release:
+    desc: Validate and tag the current release, then prepare the next snapshot
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun "{{.DRY_RUN}}" -NextVersion "{{.NEXT_VERSION}}" -SkipValidation "{{.SKIP_VALIDATION}}" -Image "{{.IMAGE}}"
+
   compile:
     desc: Compile Python sources
     cmds:

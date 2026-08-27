@@ -320,6 +320,15 @@ Regenerate locked Linux/Python 3.13 dependencies:
 task deps
 ```
 
+Preview and run a release from a clean, synchronized `main` branch:
+
+```bash
+task release DRY_RUN=1
+task release
+```
+
+The release task validates the package, CodeQL results, Dockerfile, full baked image, and unit tests inside that built image. It creates local release commits and an annotated `vX.Y.Z` tag, then prepares the next minor snapshot. It never pushes Git commits, tags, or Docker images; reviewed tags trigger the GitHub Actions image publication workflows only after the repository owner pushes them. Use `NEXT_VERSION=0.1.1-snapshot` to override the default next-minor snapshot, or `SKIP_VALIDATION=1` only when the same release commit has already passed the complete validation sequence.
+
 Stop containers:
 
 ```bash
@@ -344,6 +353,30 @@ task benchmark-transcription-06b
 ```
 
 The benchmark scores focus on transcription meaning. Punctuation, quote recovery, and expressive marks are counted as bonus signal rather than required exact text.
+
+## Version History
+
+### v0.1.0
+
+- Forked Qwen3-ASR into a Hangry Labs runtime-focused project for local and private speech-to-text inference.
+- Added a Python 3.13 runtime with pinned dependencies and reproducible full and tiny Docker image targets.
+- Added a full offline-capable image with the Qwen3-ASR 0.6B and 1.7B models plus the optional forced-aligner asset baked into the image and validated during builds.
+- Added a tiny image for smaller deployments that download models into a persistent Hugging Face cache volume.
+- Made Qwen3-ASR 0.6B the default model while retaining configurable 1.7B support and model-specific GPU/context profiles.
+- Added persistent vLLM/Torch compile caching, startup warmup, deterministic decoding, bounded generation, and offline runtime defaults.
+- Added a combined FastAPI and Gradio service that exposes the browser UI and APIs from one container and port.
+- Added a browser UI for file upload, microphone recording, bundled examples, language selection, realtime transcription, API status, response inspection, and GPU monitoring.
+- Added the OpenAI-compatible `/v1/audio/transcriptions` API with JSON, verbose JSON, and text responses, automatic or forced language selection, model discovery, and supported-language routes.
+- Added local realtime transcription session APIs and UI streaming with buffered appends, incremental results, finalization, deletion, and abandoned-session cleanup.
+- Added optional forced alignment for timestamped transcription responses without loading the aligner into VRAM by default.
+- Added HTTPS certificate and key configuration so browser microphone capture can work from secure remote origins.
+- Serialized access to the synchronous offline vLLM engine to prevent unsafe overlapping inference across API, realtime, UI, warmup, and watchdog operations.
+- Added inference and queue deadlines, degraded readiness state, diagnostic logging, and supervised process recycling when an engine call cannot be recovered safely.
+- Added separate liveness and readiness endpoints, inference metrics, startup readiness probes, and a periodic auto-language inference watchdog.
+- Added 0.6B and 1.7B VRAM and multilingual transcription benchmark workflows with mandatory prewarming and a 300-file, 30-language test corpus.
+- Added Taskfile workflows for dependency locking, image builds, local deployments, model-specific benchmarks, API checks, logs, cleanup, CodeQL analysis, and guarded releases.
+- Added GitHub Actions for lightweight source and packaging checks plus full/tiny Docker image publication with rolling and immutable release tags.
+- Removed upstream training, fine-tuning, and dataset-preparation surfaces to keep the fork focused on inference, Docker deployment, API compatibility, UI testing, and operational reliability.
 
 ## Responsible Use and Privacy
 
