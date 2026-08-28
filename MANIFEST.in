@@ -2,8 +2,10 @@ global-exclude *
 
 recursive-include qwen_asr *.py *.pyi py.typed
 recursive-include qwen_asr *.dict
+recursive-include qwen_asr *.html *.css *.js *.woff2 LICENSE
 
 include LICENSE
+include THIRD_PARTY_NOTICES.md
 include MANIFEST.in
 include pyproject.toml
 

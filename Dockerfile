@@ -23,7 +23,7 @@ RUN python -m pip install --upgrade pip setuptools wheel \
 RUN ln -sfn lib /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib64 \
     && ln -sfn libcudart.so.13 /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib/libcudart.so
 
-COPY pyproject.toml README.md LICENSE VERSION /app/
+COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md VERSION /app/
 COPY qwen_asr /app/qwen_asr
 COPY hangrylabs /app/hangrylabs
 COPY testbench /app/testbench

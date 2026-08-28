@@ -295,6 +295,18 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "Qwen/Qwen3-ASR-0.6B-hf")
 
+    def test_readiness_reports_timestamp_capability(self):
+        without_aligner = _client().get("/health/ready")
+        with_aligner = _client(FakeASR(forced_aligner=object())).get("/health/ready")
+
+        self.assertFalse(without_aligner.json()["capabilities"]["timestamps"])
+        self.assertEqual(without_aligner.json()["capabilities"]["timestamp_granularities"], [])
+        self.assertTrue(with_aligner.json()["capabilities"]["timestamps"])
+        self.assertEqual(
+            with_aligner.json()["capabilities"]["timestamp_granularities"],
+            ["word", "segment"],
+        )
+
     def test_translation_endpoint_is_explicitly_not_ready(self):
         response = _client().post("/v1/audio/translations", files=_files(), data={"model": "qwen3-asr"})
         self.assertEqual(response.status_code, 501)

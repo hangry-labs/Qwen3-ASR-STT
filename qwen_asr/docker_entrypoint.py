@@ -180,8 +180,8 @@ def main() -> int:
         f"configuration resolved: model={asr_model} backend={backend} "
         f"host={host} port={port} concurrency={concurrency} backend_kwargs={model_kwargs}"
     )
-    with StartupTimer("import combined Gradio UI/OpenAI API server"):
-        from qwen_asr.server.app import run_server as run_ui
+    with StartupTimer("import combined browser UI/OpenAI API server"):
+        from qwen_asr.standalone_ui.server import run_server as run_ui
 
     run_ui(
         asr_checkpoint=asr_model,

@@ -25,7 +25,7 @@ This Hangry Labs image is built for private local inference. Run the container, 
 
 ## Browser UI
 
-Open the local UI at:
+Open the primary browser UI at:
 
 ```text
 http://localhost:8000
@@ -35,7 +35,7 @@ http://localhost:8000
   <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/docs/ui.jpg" alt="Qwen3-ASR-STT browser UI">
 </p>
 
-The UI supports normal transcription and realtime microphone transcription. It also includes a GPU card so local VRAM and utilization are visible while testing.
+The responsive UI provides file upload and browser recording, a replaceable waveform editor with playback and trimming controls, bundled multilingual examples, realtime microphone transcription, API status, and GPU monitoring. Model readiness and the UI build version are visible in the header, while timestamp controls report immediately when the optional forced aligner is disabled.
 
 Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
 
@@ -53,7 +53,7 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
   hangrylabs/qwen3-asr-stt:latest
 ```
 
-Then open:
+Then open the UI:
 
 ```text
 http://localhost:8000
@@ -178,7 +178,7 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
   hangrylabs/qwen3-asr-stt:latest
 ```
 
-Each container starts the Gradio UI and OpenAI-compatible API together on port 8000.
+Each container starts the browser UI and OpenAI-compatible API together on port 8000.
 
 Enable timestamp output through the forced aligner:
 

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Qwen3-ASR-STT</title>
+  <link rel="icon" href="/brand/favicon_small.png">
+  <link rel="stylesheet" href="/static/vendor/lucide/lucide.css">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <header class="brand-hero">
+    <img class="brand-backdrop" src="/brand/banner.jpg" alt="" aria-hidden="true">
+    <div class="brand-shade"></div>
+    <nav class="brand-nav" aria-label="Application links">
+      <div class="brand-lockup">
+        <img src="/brand/logo_small.png" alt="Hangry Labs">
+        <div><strong>Hangry Labs</strong><span>Local speech infrastructure</span></div>
+      </div>
+      <div class="brand-links">
+        <a class="primary-link" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/tree/main/testbench" target="_blank" rel="noreferrer"><i class="icon-sparkles"></i>Examples</a>
+        <a href="/docs"><i class="icon-book-open"></i>API docs</a>
+        <a href="/v1/models"><i class="icon-boxes"></i>Models</a>
+        <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT" target="_blank" rel="noreferrer"><i class="icon-git-branch"></i>GitHub</a>
+      </div>
+    </nav>
+    <div class="brand-copy">
+      <h1><span class="qwen-highlight" data-text="Qwen3-ASR-STT">Qwen3-ASR-STT</span></h1>
+      <p>Offline speech recognition with OpenAI-compatible APIs.</p>
+    </div>
+    <div class="runtime-badge" id="runtime-badge" data-state="starting">
+      <i class="icon-activity"></i>
+      <div class="runtime-copy"><strong>Inference starting</strong><span id="runtime-model">Waiting for inference service</span></div>
+      <span class="runtime-version">UI v{{UI_VERSION}}</span>
+    </div>
+  </header>
+
+  <div class="app-tabs" role="tablist" aria-label="Workspace views">
+    <button class="tab-button active" type="button" role="tab" aria-selected="true" data-tab="transcribe">Transcribe</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="stream">Stream</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="api">API</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="system">System</button>
+  </div>
+
+  <main class="workspace">
+    <aside class="settings-panel">
+      <div class="section-title"><i class="icon-sliders-horizontal"></i><span>Inference</span></div>
+      <div class="field"><span>Model</span><div class="model-display"><i class="icon-boxes"></i><strong id="model-name">Detecting active model…</strong></div></div>
+      <label class="field"><span>Language</span>
+        <select id="language">
+          <option>Auto</option><option>Chinese</option><option>English</option><option>Cantonese</option><option>Arabic</option>
+          <option>German</option><option>French</option><option>Spanish</option><option>Portuguese</option><option>Indonesian</option>
+          <option>Italian</option><option>Korean</option><option>Russian</option><option>Thai</option><option>Vietnamese</option>
+          <option>Japanese</option><option>Turkish</option><option>Hindi</option><option>Malay</option><option>Dutch</option>
+          <option>Swedish</option><option>Danish</option><option>Finnish</option><option>Polish</option><option>Czech</option>
+          <option>Filipino</option><option>Persian</option><option>Greek</option><option>Romanian</option><option>Hungarian</option><option>Macedonian</option>
+        </select>
+      </label>
+      <label class="field"><span>Prompt / context</span><textarea id="prompt" rows="5" placeholder="Optional spelling or context"></textarea></label>
+      <div class="status-line" id="global-status" data-tone="neutral">Connecting to inference</div>
+    </aside>
+
+    <section class="content-panel">
+      <div class="tab-panel" data-panel="transcribe">
+        <form id="transcribe-form">
+          <div class="panel-toolbar">
+            <label class="compact-field"><span>Response format</span>
+              <select id="response-format"><option>json</option><option>text</option><option>verbose_json</option><option>srt</option><option>vtt</option></select>
+            </label>
+            <div class="timestamp-options">
+              <span>Timestamps</span>
+              <label><input type="checkbox" name="timestamp" value="word"> Word</label>
+              <label><input type="checkbox" name="timestamp" value="segment"> Segment</label>
+              <small id="timestamp-support" data-state="checking">Checking aligner…</small>
+            </div>
+          </div>
+
+          <div class="segmented-control" aria-label="Audio source">
+            <button class="active" type="button" data-source="upload"><i class="icon-upload"></i> Upload</button>
+            <button type="button" data-source="record"><i class="icon-mic"></i> Record</button>
+          </div>
+
+          <div id="upload-source">
+            <div id="upload-editor"></div>
+            <div class="example-row">
+              <label class="compact-field grow"><span>Example file</span><select id="example-select"><option value="">Choose an example</option></select></label>
+              <button class="secondary-button" id="example-load" type="button"><i class="icon-file-audio"></i> Load</button>
+            </div>
+          </div>
+
+          <div id="record-source" hidden>
+            <div id="record-editor"></div>
+            <div class="record-toolbar" id="record-controls">
+              <label class="compact-field grow"><span>Microphone</span><select id="record-device"><option value="">Default microphone</option></select></label>
+              <button class="icon-button bordered" id="record-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
+              <button class="record-button" id="record-start" type="button"><i class="icon-mic"></i> Record</button>
+              <button class="secondary-button" id="record-stop" type="button" disabled><i class="icon-square"></i> Stop</button>
+              <span class="record-state" id="record-state">Ready</span>
+            </div>
+          </div>
+
+          <button class="primary-button" id="transcribe-button" type="submit"><i class="icon-audio-lines"></i> Transcribe</button>
+        </form>
+
+        <section class="output-section">
+          <div class="section-title"><i class="icon-message-square-text"></i><span>Transcript</span></div>
+          <div class="transcript-output" id="transcript-output"></div>
+          <details><summary>Response details</summary><pre id="response-output"></pre></details>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-panel="stream" hidden>
+        <div class="live-recorder">
+          <div class="audio-editor-head">
+            <div class="audio-label"><i class="icon-mic"></i><span>Realtime microphone</span><small id="realtime-state">Ready</small></div>
+            <button class="icon-button" id="realtime-reset" type="button" title="Reset realtime session" aria-label="Reset realtime session"><i class="icon-x"></i></button>
+          </div>
+          <canvas id="realtime-wave" aria-label="Live microphone waveform"></canvas>
+          <div class="live-controls">
+            <button class="record-button" id="realtime-start" type="button"><span class="record-dot"></span> Start</button>
+            <button class="secondary-button" id="realtime-stop" type="button" disabled><i class="icon-square"></i> Stop and finalize</button>
+            <label class="device-field"><select id="realtime-device"><option value="">Default microphone</option></select></label>
+            <button class="icon-button bordered" id="realtime-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
+          </div>
+        </div>
+
+        <details class="settings-details">
+          <summary>Realtime settings</summary>
+          <div class="range-grid">
+            <label>
+              <span class="range-heading"><span class="setting-name">Chunk seconds <span class="setting-help"><button type="button" aria-label="About chunk seconds" aria-describedby="chunk-size-help">i</button><span class="setting-tooltip" id="chunk-size-help" role="tooltip">Audio collected for each incremental decode. Lower values update sooner but run inference more often; higher values add latency and context.</span></span></span><output data-output="chunk-size"></output></span>
+              <input id="chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2">
+            </label>
+            <label>
+              <span class="range-heading"><span class="setting-name">Unfixed chunks <span class="setting-help"><button type="button" aria-label="About unfixed chunks" aria-describedby="unfixed-chunks-help">i</button><span class="setting-tooltip" id="unfixed-chunks-help" role="tooltip">Opening chunks decoded without using the previous transcript as a prefix. Higher values let early wording remain revisable for longer.</span></span></span><output data-output="unfixed-chunks"></output></span>
+              <input id="unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2">
+            </label>
+            <label>
+              <span class="range-heading"><span class="setting-name">Unfixed tokens <span class="setting-help"><button type="button" aria-label="About unfixed tokens" aria-describedby="unfixed-tokens-help">i</button><span class="setting-tooltip" id="unfixed-tokens-help" role="tooltip">Trailing tokens removed before the previous transcript is reused as context. Higher values let more recent words be corrected and reduce boundary jitter.</span></span></span><output data-output="unfixed-tokens"></output></span>
+              <input id="unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5">
+            </label>
+          </div>
+        </details>
+
+        <section class="output-section realtime-output-section">
+          <div class="output-heading"><div class="section-title"><i class="icon-radio"></i><span>Realtime transcript</span></div><div><span id="realtime-language">Auto detection</span><span class="final-badge" id="realtime-final" hidden>Final</span></div></div>
+          <div class="transcript-output" id="realtime-output"></div>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-panel="api" hidden>
+        <div class="view-heading"><div><h2>API status</h2><p>OpenAI-compatible runtime endpoints</p></div><button class="secondary-button" id="api-refresh" type="button"><i class="icon-refresh-cw"></i> Refresh</button></div>
+        <pre class="data-output" id="api-output">Select Refresh to query the API.</pre>
+      </div>
+
+      <div class="tab-panel" data-panel="system" hidden>
+        <div class="view-heading"><div><h2>System</h2><p>Inference readiness and GPU runtime</p></div><button class="secondary-button" id="system-refresh" type="button"><i class="icon-refresh-cw"></i> Refresh</button></div>
+        <div class="system-grid"><pre class="data-output" id="readiness-output">Readiness unavailable.</pre><div id="gpu-output"></div></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="alert" hidden></div>
+</body>
+</html>

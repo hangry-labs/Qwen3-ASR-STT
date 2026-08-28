@@ -35,7 +35,7 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
   hangrylabs/qwen3-asr-stt:latest
 ```
 
-Then open:
+Then open the browser UI:
 
 ```text
 http://localhost:8000
@@ -86,16 +86,16 @@ Snapshot or development version tags are intentionally not published. Release ta
 
 ## Browser UI
 
-The included UI is meant for practical local testing:
+The primary responsive browser UI runs on port 8000 alongside the OpenAI-compatible API. Its HTML, CSS, JavaScript, icons, and WaveSurfer assets are included locally, so the full image remains usable offline after it is pulled.
 
-- Upload an audio file and transcribe it
-- Record audio directly in the browser
-- Use bundled example files from the testbench
-- Try realtime microphone transcription
-- Select language or automatic language detection
-- View raw response details
-- Refresh API status
-- Watch GPU utilization and VRAM
+The interface provides four focused views:
+
+- **Transcribe:** upload or record audio inside a replaceable waveform editor with playback, seeking, volume, speed, trimming, and download controls; load bundled multilingual examples without changing the selected language; choose the response format and inspect the raw response.
+- **Stream:** transcribe the microphone incrementally, finalize or reset a session, choose an input device, and use inline explanations for chunk and transcript-stability settings.
+- **API:** inspect health, model, language, and inference status from the same service.
+- **System:** inspect readiness, GPU utilization, and VRAM.
+
+The header reports the active model, inference readiness, and UI build version. Word and segment timestamp controls check forced-aligner availability immediately; the aligner remains disabled by default and the UI explains how to enable it when timestamps are requested.
 
 <p>
   <img src="docs/ui.jpg" alt="Qwen3-ASR-STT browser UI">
@@ -201,7 +201,7 @@ The forced aligner is disabled by default so it does not occupy VRAM. Enable it 
 
 ## Runtime Settings
 
-Every container starts the combined Gradio UI and OpenAI-compatible API on the same port.
+Every container starts the browser UI and OpenAI-compatible API together on port 8000.
 
 Common environment variables:
 
@@ -369,6 +369,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Restored full-and-piecewise CUDA graph execution, FlashInfer kernels, deterministic decoding, representative auto/forced-language warmups, and persistent vLLM, FlashInfer, and TorchInductor caches.
 - Reduced the 0.6B 300-file transcription benchmark from 277.136 seconds on the initial v0.2 native Transformers path to 31.497 seconds on the integrated vLLM path. This is 43% faster than the historical v0.1 result of 55.382 seconds while maintaining comparable quality at 96.05 versus 95.99.
 - Preserved realtime decoding, optional native forced alignment, serialized inference, readiness, watchdog, and process-recovery safeguards.
+- Replaced the previous Gradio interface with a responsive local browser UI on the main port 8000, removing the second UI listener and Gradio runtime dependency.
+- Added the branded model/readiness/version header, replaceable waveform upload and recording editors, playback and trimming tools, multilingual examples, direct aligner capability feedback, realtime-setting explanations, API status, and GPU visibility.
 
 ### v0.1.0
 
@@ -419,7 +421,10 @@ This repository preserves upstream attribution and license while focusing on Han
 
 ## License
 
-This project is released under the Apache-2.0 license. See `LICENSE`.
+This project is released under the Apache-2.0 license. See [`LICENSE`](LICENSE).
+The standalone browser UI includes permissively licensed third-party assets;
+see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for attribution and the
+locations of their complete license texts.
 
 ## Citation
 

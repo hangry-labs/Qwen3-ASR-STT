@@ -117,14 +117,14 @@ class DockerEntrypointTests(unittest.TestCase):
     def _fake_server_modules(captured: dict):
         fake_package = ModuleType("qwen_asr")
         fake_package.__path__ = []
-        fake_server = ModuleType("qwen_asr.server")
+        fake_server = ModuleType("qwen_asr.standalone_ui")
         fake_server.__path__ = []
-        fake_app = ModuleType("qwen_asr.server.app")
+        fake_app = ModuleType("qwen_asr.standalone_ui.server")
         fake_app.run_server = lambda **kwargs: captured.update(kwargs)
         return {
             "qwen_asr": fake_package,
-            "qwen_asr.server": fake_server,
-            "qwen_asr.server.app": fake_app,
+            "qwen_asr.standalone_ui": fake_server,
+            "qwen_asr.standalone_ui.server": fake_app,
         }
 
     def test_main_uses_vllm_06b_runtime_defaults(self):

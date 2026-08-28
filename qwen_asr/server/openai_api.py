@@ -548,6 +548,11 @@ def create_app(
 
     async def readiness_response() -> JSONResponse:
         payload = await coordinator.snapshot()
+        timestamps_available = getattr(asr, "forced_aligner", None) is not None
+        payload["capabilities"] = {
+            "timestamps": timestamps_available,
+            "timestamp_granularities": ["word", "segment"] if timestamps_available else [],
+        }
         return JSONResponse(status_code=200 if payload["status"] == "ok" else 503, content=payload)
 
     @app.get("/health/ready")
