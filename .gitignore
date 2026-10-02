@@ -25,3 +25,7 @@ env/
 .idea
 .codeql/
 testbench/results/*.json
+
+# Local agent workspace and repository instructions
+/.ai/
+/AGENTS.md

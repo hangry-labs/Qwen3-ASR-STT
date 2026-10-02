@@ -117,8 +117,16 @@ $nextProjectVersion = "$nextReleaseVersion.dev0"
 $readme = Get-Content -Raw -LiteralPath "README.md"
 $stableHeading = "### $releaseTag"
 $snapshotHeading = "### v$currentVersion"
-if (-not $readme.Contains($stableHeading) -and -not $readme.Contains($snapshotHeading)) {
-    throw "README.md must contain a '$stableHeading' release-history heading before release."
+$developmentHeading = "### v$releaseVersion (in development)"
+$stableHeadingPattern = '(?m)^' + [regex]::Escape($stableHeading) + '\r?$'
+$snapshotHeadingPattern = '(?m)^(' +
+    [regex]::Escape($snapshotHeading) + '|' +
+    [regex]::Escape($developmentHeading) + ')\r?$'
+if (
+    -not [regex]::IsMatch($readme, $stableHeadingPattern) -and
+    -not [regex]::IsMatch($readme, $snapshotHeadingPattern)
+) {
+    throw "README.md must contain an exact '$stableHeading', '$snapshotHeading', or '$developmentHeading' release-history heading before release."
 }
 
 $branch = (git branch --show-current).Trim()
@@ -182,13 +190,14 @@ Invoke-Step "Update release metadata for $releaseTag" {
         if (-not (Test-Path -LiteralPath $doc)) { continue }
         $content = Get-Content -Raw -LiteralPath $doc
         $content = $content.Replace("### v$currentVersion", $stableHeading)
+        $content = $content.Replace($developmentHeading, $stableHeading)
         $content = $content.Replace(":v$currentVersion", ":$releaseTag")
         Set-Utf8Text $doc $content
     }
 
     $updatedReadme = Get-Content -Raw -LiteralPath "README.md"
-    if (-not $updatedReadme.Contains($stableHeading)) {
-        throw "README.md does not contain the required '$stableHeading' release-history heading."
+    if (-not [regex]::IsMatch($updatedReadme, $stableHeadingPattern)) {
+        throw "README.md does not contain the required exact '$stableHeading' release-history heading."
     }
 }
 

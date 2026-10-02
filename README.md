@@ -330,7 +330,7 @@ task release DRY_RUN=1
 task release
 ```
 
-The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates the release commit and annotated `vX.Y.Z` tag, prepares the next minor snapshot commit, then atomically pushes `main` and the release tag to `origin`. GitHub Actions remains solely responsible for publishing Docker images. Use `NEXT_VERSION=0.1.1-snapshot` to override the default next-minor snapshot, or `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when runtime verification is required.
+The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates the release commit and annotated `vX.Y.Z` tag, prepares the next minor snapshot commit, then atomically pushes `main` and the release tag to `origin`. GitHub Actions remains solely responsible for publishing Docker images. Use `NEXT_VERSION=0.2.1-snapshot` to override the default `0.3.0-snapshot` next-minor version, or `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when dependency-backed or runtime verification is required.
 
 Stop containers:
 
@@ -361,6 +361,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ### v0.2.0 (in development)
 
+- Synchronized the maintained Hangry Labs runtime with upstream Qwen3-ASR through upstream commit `7c6daf7`.
 - Migrated the runtime to the upstream Hugging Face Qwen3-ASR and forced-aligner implementations.
 - Replaced the legacy checkpoints with `Qwen3-ASR-0.6B-hf`, `Qwen3-ASR-1.7B-hf`, and `Qwen3-ForcedAligner-0.6B-hf` in the offline image.
 - Replaced the deleted custom vLLM model/plugin with vLLM 0.26's maintained built-in Qwen3-ASR implementation and made it the production default.
@@ -371,6 +372,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Preserved realtime decoding, optional native forced alignment, serialized inference, readiness, watchdog, and process-recovery safeguards.
 - Replaced the previous Gradio interface with a responsive local browser UI on the main port 8000, removing the second UI listener and Gradio runtime dependency.
 - Added the branded model/readiness/version header, replaceable waveform upload and recording editors, playback and trimming tools, multilingual examples, direct aligner capability feedback, realtime-setting explanations, API status, and GPU visibility.
+- Vendored Lucide and WaveSurfer assets for offline UI use and preserved their licenses in the distribution and third-party notices.
+- Removed the legacy `qwen_asr.server.app` module and direct-library example scripts so the supported product surface is the Docker-first standalone UI and OpenAI-compatible API.
 
 ### v0.1.0
 
