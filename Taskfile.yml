@@ -46,7 +46,7 @@ vars:
   LOCAL_SOURCE_ENV: >-
     -e QWEN_ASR_UI_DEV=1
     -v "{{.TASKFILE_DIR}}\qwen_asr:/app/qwen_asr"
-    -v "{{.TASKFILE_DIR}}\hangrylabs:/app/hangrylabs"
+    -v "{{.TASKFILE_DIR}}\assets:/app/assets:ro"
     -v "{{.TASKFILE_DIR}}\testbench:/app/testbench"
     -v "{{.TASKFILE_DIR}}\VERSION:/app/VERSION:ro"
   MAX_INFERENCE_BATCH_SIZE: '2'

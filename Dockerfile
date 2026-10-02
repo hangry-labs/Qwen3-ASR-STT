@@ -25,7 +25,7 @@ RUN ln -sfn lib /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib64 \
 
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md VERSION /app/
 COPY qwen_asr /app/qwen_asr
-COPY hangrylabs /app/hangrylabs
+COPY assets/qwen3_asr_favicon.webp assets/qwen3_asr_logo_horizontal.webp assets/hangrylabs_logo_horizontal.webp /app/assets/
 COPY testbench /app/testbench
 
 RUN python -m pip install -e . --no-deps

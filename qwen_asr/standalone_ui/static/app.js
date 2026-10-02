@@ -8,6 +8,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)]
 const state = {
   source: 'upload',
   activeTab: 'transcribe',
+  headerCollapsed: false,
   backendReady: false,
   model: 'qwen3-asr',
   timestampsAvailable: null,
@@ -17,6 +18,7 @@ const state = {
   gpuTimer: null,
   gpuRefreshActive: false,
   gpuHovering: false,
+  headerAnimation: null,
 }
 
 const GPU_HISTORY_RETENTION_MS = 10 * 60 * 1000
@@ -80,6 +82,7 @@ function persistUiSession() {
   try {
     sessionStorage.setItem(UI_SESSION_KEY, JSON.stringify({
       activeTab: state.activeTab,
+      headerCollapsed: state.headerCollapsed,
       gpuWindowMs: state.gpuWindowMs,
     }))
   } catch {
@@ -102,6 +105,7 @@ function persistGpuSession() {
 function restoreSessionState() {
   const ui = readSessionJson(UI_SESSION_KEY)
   if (['transcribe', 'stream', 'api', 'system'].includes(ui?.activeTab)) state.activeTab = ui.activeTab
+  if (typeof ui?.headerCollapsed === 'boolean') state.headerCollapsed = ui.headerCollapsed
   if ([60 * 1000, 10 * 60 * 1000].includes(ui?.gpuWindowMs)) state.gpuWindowMs = ui.gpuWindowMs
 
   const cached = readSessionJson(GPU_SESSION_KEY)
@@ -115,6 +119,44 @@ function restoreSessionState() {
     if (recent.length) state.gpuHistory.set(Number(index), recent)
   })
 }
+
+function setHeroCollapsed(collapsed, persist = true, animate = true) {
+  const hero = $('#brand-hero')
+  const toggle = $('#hero-toggle')
+  state.headerAnimation?.cancel()
+  const startHeight = hero.getBoundingClientRect().height
+
+  state.headerCollapsed = collapsed
+  const action = collapsed ? 'Expand header' : 'Collapse header'
+  document.documentElement.dataset.headerCollapsed = String(collapsed)
+  hero.dataset.collapsed = String(collapsed)
+  toggle.setAttribute('aria-expanded', String(!collapsed))
+  toggle.setAttribute('aria-label', action)
+  toggle.title = action
+  toggle.querySelector('i').className = collapsed ? 'icon-chevron-down' : 'icon-chevron-up'
+
+  const endHeight = hero.getBoundingClientRect().height
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (animate && !reducedMotion && Math.abs(startHeight - endHeight) > 1) {
+    hero.classList.add('is-rolling')
+    const animation = hero.animate(
+      [{ height: `${startHeight}px` }, { height: `${endHeight}px` }],
+      { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both' },
+    )
+    state.headerAnimation = animation
+    animation.finished
+      .catch(() => {})
+      .finally(() => {
+        if (state.headerAnimation !== animation) return
+        hero.classList.remove('is-rolling')
+        state.headerAnimation = null
+        animation.cancel()
+      })
+  }
+  if (persist) persistUiSession()
+}
+
+$('#hero-toggle').addEventListener('click', () => setHeroCollapsed(!state.headerCollapsed))
 
 function activateTab(name) {
   state.activeTab = name
@@ -157,35 +199,53 @@ async function refreshAudioDevices(select) {
   if ([...select.options].some((option) => option.value === current)) select.value = current
 }
 
-const recordPlugin = recordEditor.attachRecorder({
+function setRecordButton(recording, busy = false) {
+  const button = $('#record-toggle')
+  const changed = button.dataset.recording !== String(recording)
+  button.dataset.recording = String(recording)
+  button.setAttribute('aria-pressed', String(recording))
+  button.disabled = busy
+  $('#record-device').disabled = recording || busy
+  $('#record-device-refresh').disabled = recording || busy
+  if (changed) button.innerHTML = recording
+    ? '<i class="icon-square"></i> Stop recording'
+    : '<i class="icon-mic"></i> Record'
+}
+
+recordEditor.attachRecorder({
   onStart: () => {
-    $('#record-start').disabled = true
-    $('#record-stop').disabled = false
+    setRecordButton(true)
     $('#record-state').textContent = 'Recording 0:00'
   },
   onProgress: (duration) => {
     $('#record-state').textContent = `Recording ${formatTime(duration / 1000)}`
   },
-  onEnd: () => {
-    $('#record-start').disabled = false
-    $('#record-stop').disabled = true
-    $('#record-state').textContent = 'Recording ready'
+  onEnd: (_file, duration) => {
+    setRecordButton(false)
+    $('#record-state').textContent = `Recording ready · ${formatTime(duration / 1000)}`
   },
 })
+setRecordButton(false)
 
-$('#record-start').addEventListener('click', async () => {
+$('#record-toggle').addEventListener('click', async () => {
+  if (recordEditor.isRecording()) {
+    setRecordButton(true, true)
+    recordEditor.stopRecording()
+    return
+  }
+
+  setRecordButton(false, true)
   try {
     const deviceId = $('#record-device').value
-    await recordPlugin.startRecording(deviceId ? { deviceId: { exact: deviceId } } : undefined)
+    await recordEditor.startRecording(deviceId ? { deviceId: { exact: deviceId } } : undefined)
     await refreshAudioDevices($('#record-device'))
   } catch (error) {
-    $('#record-start').disabled = false
-    $('#record-stop').disabled = true
+    setRecordButton(false)
+    $('#record-state').textContent = 'Ready to record'
     showToast(errorMessage(error))
   }
 })
 
-$('#record-stop').addEventListener('click', () => recordPlugin.stopRecording())
 $('#record-device-refresh').addEventListener('click', async () => {
   try {
     await navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => stream.getTracks().forEach((track) => track.stop()))
@@ -210,9 +270,11 @@ async function loadExamples() {
   })
 }
 
-$('#example-load').addEventListener('click', async () => {
+$('#example-select').addEventListener('change', async () => {
   const option = $('#example-select').selectedOptions[0]
   if (!option?.value) return
+  const select = $('#example-select')
+  select.disabled = true
   try {
     setStatus('Loading example')
     const response = await fetch(option.value)
@@ -222,7 +284,11 @@ $('#example-load').addEventListener('click', async () => {
     $('[data-source="upload"]').click()
     setStatus('Example ready', 'success')
   } catch (error) {
+    select.value = ''
+    setStatus('Example load failed', 'error')
     showToast(errorMessage(error))
+  } finally {
+    select.disabled = false
   }
 })
 
@@ -301,11 +367,26 @@ $$('input[type="range"][data-setting]').forEach((input) => {
   input.addEventListener('input', () => sliderOutput(input))
 })
 
+function setRealtimeButton(recording, busy = false) {
+  const button = $('#realtime-toggle')
+  const changed = button.dataset.recording !== String(recording)
+  button.dataset.recording = String(recording)
+  button.setAttribute('aria-pressed', String(recording))
+  button.disabled = busy
+  $('#realtime-device').disabled = recording || busy
+  $('#realtime-device-refresh').disabled = recording || busy
+  if (changed) button.innerHTML = recording
+    ? '<i class="icon-square"></i> Stop and finalize'
+    : '<span class="record-dot"></span> Start'
+}
+
 const realtime = new RealtimeRecorder({
   canvas: $('#realtime-wave'),
   onState: (value) => {
     $('#realtime-state').textContent = value
     setStatus(value, value === 'Finalized' ? 'success' : 'neutral')
+    if (value === 'Recording' || value.startsWith('Recording ')) setRealtimeButton(true)
+    if (value === 'Ready' || value === 'Finalized') setRealtimeButton(false)
   },
   onTranscript: (text, language, final) => {
     $('#realtime-output').textContent = text
@@ -314,8 +395,22 @@ const realtime = new RealtimeRecorder({
   },
   onError: (error) => showToast(errorMessage(error)),
 })
+setRealtimeButton(false)
 
-$('#realtime-start').addEventListener('click', async () => {
+$('#realtime-toggle').addEventListener('click', async () => {
+  if (realtime.running) {
+    setRealtimeButton(true, true)
+    try {
+      await realtime.stop()
+    } catch (error) {
+      showToast(errorMessage(error))
+    } finally {
+      setRealtimeButton(false)
+    }
+    return
+  }
+
+  setRealtimeButton(false, true)
   try {
     await realtime.start({
       deviceId: $('#realtime-device').value,
@@ -326,8 +421,6 @@ $('#realtime-start').addEventListener('click', async () => {
       unfixedChunks: Number($('#unfixed-chunks').value),
       unfixedTokens: Number($('#unfixed-tokens').value),
     })
-    $('#realtime-start').disabled = true
-    $('#realtime-stop').disabled = false
     await refreshAudioDevices($('#realtime-device'))
   } catch (error) {
     showToast(errorMessage(error))
@@ -335,21 +428,13 @@ $('#realtime-start').addEventListener('click', async () => {
   }
 })
 
-$('#realtime-stop').addEventListener('click', async () => {
-  $('#realtime-stop').disabled = true
-  try {
-    await realtime.stop()
-  } catch (error) {
-    showToast(errorMessage(error))
-  } finally {
-    $('#realtime-start').disabled = false
-  }
-})
-
 $('#realtime-reset').addEventListener('click', async () => {
-  await realtime.reset()
-  $('#realtime-start').disabled = false
-  $('#realtime-stop').disabled = true
+  setRealtimeButton(realtime.running, true)
+  try {
+    await realtime.reset()
+  } finally {
+    setRealtimeButton(false)
+  }
 })
 
 $('#realtime-device-refresh').addEventListener('click', async () => {
@@ -664,6 +749,7 @@ async function pollReadiness() {
     badge.dataset.state = state.backendReady ? 'ready' : 'starting'
     badge.querySelector('strong').textContent = state.backendReady ? 'Inference ready' : 'Inference starting'
     model.textContent = readiness.model || 'Qwen3-ASR'
+    badge.title = readiness.model || 'Qwen3-ASR'
     if (state.backendReady && $('#global-status').textContent === 'Connecting to inference') {
       setStatus('Ready', 'success')
     }
@@ -672,6 +758,7 @@ async function pollReadiness() {
     badge.dataset.state = 'starting'
     badge.querySelector('strong').textContent = 'Inference starting'
     model.textContent = 'Waiting for inference service'
+    badge.title = 'Waiting for inference service'
   }
   setTimeout(pollReadiness, state.backendReady ? 15000 : 3000)
 }
@@ -692,6 +779,7 @@ window.addEventListener('beforeunload', () => {
 })
 
 restoreSessionState()
+setHeroCollapsed(state.headerCollapsed, false, false)
 activateTab(state.activeTab)
 loadExamples().catch(() => {})
 pollReadiness()

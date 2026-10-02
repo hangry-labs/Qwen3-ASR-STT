@@ -5,20 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Qwen3-ASR-STT</title>
-  <link rel="icon" href="/brand/favicon_small.png">
+  <link rel="icon" type="image/webp" href="/assets/qwen3_asr_favicon.webp">
+  <script>
+    try {
+      const savedUi = JSON.parse(sessionStorage.getItem('qwen-asr-ui-state-v1') || 'null')
+      if (savedUi?.headerCollapsed) document.documentElement.dataset.headerCollapsed = 'true'
+    } catch {
+      // Session storage may be unavailable in privacy-restricted browsers.
+    }
+  </script>
   <link rel="stylesheet" href="/static/vendor/lucide/lucide.css">
   <link rel="stylesheet" href="/static/styles.css">
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
-  <header class="brand-hero">
-    <img class="brand-backdrop" src="/brand/banner.jpg" alt="" aria-hidden="true">
-    <div class="brand-shade"></div>
+  <header class="brand-hero" id="brand-hero" data-collapsed="false">
+    <img class="collapsed-mascot" src="/assets/qwen3_asr_favicon.webp" alt="Qwen3-ASR-STT mascot">
     <nav class="brand-nav" aria-label="Application links">
-      <div class="brand-lockup">
-        <img src="/brand/logo_small.png" alt="Hangry Labs">
-        <div><strong>Hangry Labs</strong><span>Local speech infrastructure</span></div>
-      </div>
+      <a class="labs-badge" href="https://nuggies.website/" target="_blank" rel="noreferrer" aria-label="Hangry Labs" title="Hangry Labs">
+        <img src="/assets/hangrylabs_logo_horizontal.webp" alt="Hangry Labs">
+        <span class="labs-badge-shine" aria-hidden="true"></span>
+      </a>
       <div class="brand-links">
         <a class="primary-link" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/tree/main/testbench" target="_blank" rel="noreferrer"><i class="icon-sparkles"></i>Examples</a>
         <a href="/docs"><i class="icon-book-open"></i>API docs</a>
@@ -27,14 +34,14 @@
       </div>
     </nav>
     <div class="brand-copy">
-      <h1><span class="qwen-highlight" data-text="Qwen3-ASR-STT">Qwen3-ASR-STT</span></h1>
-      <p>Offline speech recognition with OpenAI-compatible APIs.</p>
+      <h1><img class="product-logo" src="/assets/qwen3_asr_logo_horizontal.webp" alt="Qwen3-ASR-STT - Local Speech-to-Text, Browser UI, and API"></h1>
     </div>
     <div class="runtime-badge" id="runtime-badge" data-state="starting">
       <i class="icon-activity"></i>
       <div class="runtime-copy"><strong>Inference starting</strong><span id="runtime-model">Waiting for inference service</span></div>
-      <span class="runtime-version">UI v{{UI_VERSION}}</span>
+      <a class="runtime-version" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/releases" target="_blank" rel="noreferrer" title="Open Qwen3-ASR-STT releases">UI v{{UI_VERSION}}</a>
     </div>
+    <button class="hero-toggle" id="hero-toggle" type="button" aria-controls="brand-hero" aria-expanded="true" aria-label="Collapse header" title="Collapse header"><i class="icon-chevron-up"></i></button>
   </header>
 
   <div class="app-tabs" role="tablist" aria-label="Workspace views">
@@ -86,18 +93,18 @@
             <div id="upload-editor"></div>
             <div class="example-row">
               <label class="compact-field grow"><span>Example file</span><select id="example-select"><option value="">Choose an example</option></select></label>
-              <button class="secondary-button" id="example-load" type="button"><i class="icon-file-audio"></i> Load</button>
             </div>
           </div>
 
           <div id="record-source" hidden>
             <div id="record-editor"></div>
-            <div class="record-toolbar" id="record-controls">
-              <label class="compact-field grow"><span>Microphone</span><select id="record-device"><option value="">Default microphone</option></select></label>
-              <button class="icon-button bordered" id="record-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
-              <button class="record-button" id="record-start" type="button"><i class="icon-mic"></i> Record</button>
-              <button class="secondary-button" id="record-stop" type="button" disabled><i class="icon-square"></i> Stop</button>
-              <span class="record-state" id="record-state">Ready</span>
+            <div class="record-controls" id="record-controls">
+              <div class="record-state" id="record-state" aria-live="polite">Ready to record</div>
+              <div class="record-toolbar">
+                <label class="compact-field grow"><span>Microphone</span><select id="record-device"><option value="">Default microphone</option></select></label>
+                <button class="icon-button bordered device-refresh" id="record-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
+                <button class="record-button" id="record-toggle" type="button" aria-pressed="false"><i class="icon-mic"></i> Record</button>
+              </div>
             </div>
           </div>
 
@@ -119,10 +126,9 @@
           </div>
           <canvas id="realtime-wave" aria-label="Live microphone waveform"></canvas>
           <div class="live-controls">
-            <button class="record-button" id="realtime-start" type="button"><span class="record-dot"></span> Start</button>
-            <button class="secondary-button" id="realtime-stop" type="button" disabled><i class="icon-square"></i> Stop and finalize</button>
+            <button class="record-button" id="realtime-toggle" type="button" aria-pressed="false"><span class="record-dot"></span> Start</button>
             <label class="device-field"><select id="realtime-device"><option value="">Default microphone</option></select></label>
-            <button class="icon-button bordered" id="realtime-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
+            <button class="icon-button bordered device-refresh" id="realtime-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
           </div>
         </div>
 

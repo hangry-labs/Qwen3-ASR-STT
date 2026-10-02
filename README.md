@@ -1,12 +1,14 @@
+<p align="center">
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT">
+    <img src="assets/qwen3_asr_logo_horizontal.webp" alt="Hangry Labs Qwen3-ASR-STT logo" width="900">
+  </a>
+</p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 Docker-first speech-to-text packaging for Qwen3-ASR with a local browser UI and OpenAI-compatible transcription API.
 
 This Hangry Labs fork is built for local inference. The goal is simple: pull or build a container, run it with GPU support, open the UI or call the API, and transcribe speech without sending audio to a hosted service.
-
-<p>
-  <img src="hangrylabs/banner.jpg" alt="Hangry Labs banner">
-</p>
 
 ## What This Project Provides
 
@@ -95,10 +97,10 @@ The interface provides four focused views:
 - **API:** inspect health, model, language, and inference status from the same service.
 - **System:** inspect readiness plus one-second GPU history for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Charts support timestamped hover inspection and switchable one- or ten-minute windows; recent history survives a browser reload.
 
-The header reports the active model, inference readiness, and UI build version. Word and segment timestamp controls check forced-aligner availability immediately; the aligner remains disabled by default and the UI explains how to enable it when timestamps are requested.
+The branded header reports the active model, inference readiness, and UI build version. It can collapse into a compact persistent toolbar to leave more room for transcription work. Word and segment timestamp controls check forced-aligner availability immediately; the aligner remains disabled by default and the UI explains how to enable it when timestamps are requested.
 
 <p>
-  <img src="docs/ui.jpg" alt="Qwen3-ASR-STT browser UI">
+  <img src="assets/ui.webp" alt="Qwen3-ASR-STT browser UI">
 </p>
 
 The Stream tab uses local realtime transcription sessions backed by repeated inference over accumulated audio through the configured backend. It is not a full OpenAI Realtime WebSocket implementation.
@@ -361,6 +363,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ### v0.3.0 (in development)
 
+- Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Consolidated artwork under `assets/`, converted shipped web artwork to WebP, and reduced the vendored Lucide font to the glyphs used by the workspace.
+- Refined microphone workflows with automatic example loading, single-button record/stop controls for both recorded and realtime audio, responsive recording waveforms, aligned device refresh controls, and clearer recording status placement.
 - Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration.
 - Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import mimetypes
 import os
 from pathlib import Path
 from typing import Any, Dict
@@ -20,9 +21,12 @@ from qwen_asr.web.gpu import GPU_MONITOR
 PACKAGE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = PACKAGE_DIR / "static"
 REPO_ROOT = PACKAGE_DIR.parents[1]
-BRAND_DIR = REPO_ROOT / "hangrylabs"
+ASSET_DIR = REPO_ROOT / "assets"
 TESTBENCH_DIR = REPO_ROOT / "testbench"
 MANIFEST_PATH = TESTBENCH_DIR / "manifest.json"
+
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("font/woff2", ".woff2")
 
 
 def _read_version_file() -> str:
@@ -77,14 +81,14 @@ def create_app(*, api_app: FastAPI) -> FastAPI:
         if development_assets and (
             request.url.path == "/"
             or request.url.path.startswith("/static/")
-            or request.url.path.startswith("/brand/")
+            or request.url.path.startswith("/assets/")
         ):
             response.headers["Cache-Control"] = "no-store"
         return response
 
     api_app.mount("/static", StaticFiles(directory=STATIC_DIR), name="ui-static")
-    if BRAND_DIR.is_dir():
-        api_app.mount("/brand", StaticFiles(directory=BRAND_DIR), name="ui-brand")
+    if ASSET_DIR.is_dir():
+        api_app.mount("/assets", StaticFiles(directory=ASSET_DIR), name="ui-assets")
     if TESTBENCH_DIR.is_dir():
         api_app.mount("/example-audio", StaticFiles(directory=TESTBENCH_DIR), name="ui-examples")
 

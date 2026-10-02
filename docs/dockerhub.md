@@ -1,5 +1,5 @@
 <p>
-  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/logo.jpg" alt="Hangry Labs Qwen3-ASR-STT banner">
+  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/assets/qwen3_asr_logo_horizontal.webp" alt="Hangry Labs Qwen3-ASR-STT logo">
 </p>
 
 # Hangry Labs Qwen3-ASR-STT
@@ -32,10 +32,10 @@ http://localhost:8000
 ```
 
 <p>
-  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/docs/ui.jpg" alt="Qwen3-ASR-STT browser UI">
+  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/assets/ui.webp" alt="Qwen3-ASR-STT browser UI">
 </p>
 
-The responsive UI provides file upload and browser recording, a replaceable waveform editor with playback and trimming controls, bundled multilingual examples, realtime microphone transcription, API status, and GPU monitoring. Model readiness and the UI build version are visible in the header, while timestamp controls report immediately when the optional forced aligner is disabled.
+The responsive UI provides file upload and browser recording, a replaceable waveform editor with playback and trimming controls, bundled multilingual examples, realtime microphone transcription, API status, and GPU monitoring. Model readiness and the UI build version are visible in a collapsible persistent header, while timestamp controls report immediately when the optional forced aligner is disabled.
 
 Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
 

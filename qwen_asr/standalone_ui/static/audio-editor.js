@@ -267,16 +267,30 @@ export class AudioEditor {
     this.recordPlugin = this.wave.registerPlugin(Record.create({
       renderRecordedAudio: false,
       continuousWaveform: true,
-      continuousWaveformDuration: 60,
       audioBitsPerSecond: 128000,
     }))
     this.recordPlugin.on('record-start', onStart)
     this.recordPlugin.on('record-progress', onProgress)
     this.recordPlugin.on('record-end', async (blob) => {
       await this.load(blob, `recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`)
-      onEnd(this.file)
+      onEnd(this.file, this.recordPlugin.getDuration())
     })
     return this.recordPlugin
+  }
+
+  async startRecording(constraints) {
+    if (!this.recordPlugin) throw new Error('Recorder is not initialized.')
+    this.wave.setOptions({ minPxPerSec: 0 })
+    this.wave.setTime(0)
+    await this.recordPlugin.startRecording(constraints)
+  }
+
+  stopRecording() {
+    this.recordPlugin?.stopRecording()
+  }
+
+  isRecording() {
+    return Boolean(this.recordPlugin?.isRecording())
   }
 
   showError(error) {
@@ -287,4 +301,3 @@ export class AudioEditor {
     return Record.getAvailableAudioDevices()
   }
 }
-
