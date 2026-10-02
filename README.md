@@ -363,6 +363,21 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 - No changes yet.
 
+Development images use the rolling tags published from `main`:
+
+**Standard image**
+
+```bash
+docker run --name qwen3-asr-stt-v0-3-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:latest
+```
+
+**Tiny image**
+
+```bash
+docker volume create qwen3_asr_stt_v0_3_0_hf_cache
+docker run --name qwen3-asr-stt-v0-3-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_3_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:latest_tiny
+```
+
 ### v0.2.0
 
 - Synchronized the maintained Hangry Labs runtime with upstream Qwen3-ASR through upstream commit `7c6daf7`.
@@ -378,6 +393,21 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added the branded model/readiness/version header, replaceable waveform upload and recording editors, playback and trimming tools, multilingual examples, direct aligner capability feedback, realtime-setting explanations, API status, and GPU visibility.
 - Vendored Lucide and WaveSurfer assets for offline UI use and preserved their licenses in the distribution and third-party notices.
 - Removed the legacy `qwen_asr.server.app` module and direct-library example scripts so the supported product surface is the Docker-first standalone UI and OpenAI-compatible API.
+
+Run this release with either image variant:
+
+**Standard image**
+
+```bash
+docker run --name qwen3-asr-stt-v0-2-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:v0.2.0
+```
+
+**Tiny image**
+
+```bash
+docker volume create qwen3_asr_stt_v0_2_0_hf_cache
+docker run --name qwen3-asr-stt-v0-2-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_2_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.2.0_tiny
+```
 
 ### v0.1.0
 
@@ -400,6 +430,21 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added Taskfile workflows for dependency locking, image builds, local deployments, model-specific benchmarks, API checks, logs, cleanup, CodeQL analysis, and guarded releases.
 - Added GitHub Actions for lightweight source and packaging checks plus full/tiny Docker image publication with rolling and immutable release tags.
 - Removed upstream training, fine-tuning, and dataset-preparation surfaces to keep the fork focused on inference, Docker deployment, API compatibility, UI testing, and operational reliability.
+
+Run this release with either image variant:
+
+**Standard image**
+
+```bash
+docker run --name qwen3-asr-stt-v0-1-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:v0.1.0
+```
+
+**Tiny image**
+
+```bash
+docker volume create qwen3_asr_stt_v0_1_0_hf_cache
+docker run --name qwen3-asr-stt-v0-1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_1_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.1.0_tiny
+```
 
 ## Responsible Use and Privacy
 

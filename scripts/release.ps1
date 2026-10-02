@@ -35,6 +35,36 @@ function Get-NextMinorSnapshot {
     return "$major.$minor.0-snapshot"
 }
 
+function Get-VersionHistoryDockerSection {
+    param(
+        [string]$Version,
+        [string]$AvailabilityLine,
+        [string]$LineEnding,
+        [bool]$Rolling = $false
+    )
+
+    $containerVersion = $Version.Replace(".", "-")
+    $volumeVersion = $Version.Replace(".", "_")
+    $standardTag = if ($Rolling) { "latest" } else { "v$Version" }
+    $tinyTag = if ($Rolling) { "latest_tiny" } else { "v${Version}_tiny" }
+    return @(
+        $AvailabilityLine,
+        "",
+        "**Standard image**",
+        "",
+        '```bash',
+        "docker run --name qwen3-asr-stt-v$containerVersion --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:$standardTag",
+        '```',
+        "",
+        "**Tiny image**",
+        "",
+        '```bash',
+        "docker volume create qwen3_asr_stt_v${volumeVersion}_hf_cache",
+        "docker run --name qwen3-asr-stt-v$containerVersion-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v${volumeVersion}_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:$tinyTag",
+        '```'
+    ) -join $LineEnding
+}
+
 function Invoke-Native {
     param([string]$Description, [scriptblock]$Action)
     & $Action
@@ -115,6 +145,8 @@ if ([version]$nextReleaseVersion -le [version]$releaseVersion) {
 $nextProjectVersion = "$nextReleaseVersion.dev0"
 $nextDevelopmentHeading = "### v$nextReleaseVersion (in development)"
 $nextDevelopmentHeadingPattern = '(?m)^' + [regex]::Escape($nextDevelopmentHeading) + '\r?$'
+$developmentImageNotice = "Development images use the rolling tags published from `main`:"
+$stableImageNotice = "Run this release with either image variant:"
 
 $readme = Get-Content -Raw -LiteralPath "README.md"
 $stableHeading = "### $releaseTag"
@@ -193,6 +225,22 @@ Invoke-Step "Update release metadata for $releaseTag" {
         $content = Get-Content -Raw -LiteralPath $doc
         $content = $content.Replace("### v$currentVersion", $stableHeading)
         $content = $content.Replace($developmentHeading, $stableHeading)
+        if ($doc -eq "README.md") {
+            $lineEnding = if ($content.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $developmentDockerSection = Get-VersionHistoryDockerSection `
+                -Version $releaseVersion `
+                -AvailabilityLine $developmentImageNotice `
+                -LineEnding $lineEnding `
+                -Rolling $true
+            $stableDockerSection = Get-VersionHistoryDockerSection `
+                -Version $releaseVersion `
+                -AvailabilityLine $stableImageNotice `
+                -LineEnding $lineEnding
+            if (-not $content.Contains($developmentDockerSection)) {
+                throw "README.md does not contain the expected rolling Docker section for $developmentHeading."
+            }
+            $content = $content.Replace($developmentDockerSection, $stableDockerSection)
+        }
         $content = $content.Replace(":v$currentVersion", ":$releaseTag")
         Set-Utf8Text $doc $content
     }
@@ -235,9 +283,15 @@ Invoke-Step "Prepare $nextSnapshotVersion" {
             throw "README.md release heading '$stableHeading' is not followed by a line ending."
         }
 
+        $nextDockerSection = Get-VersionHistoryDockerSection `
+            -Version $nextReleaseVersion `
+            -AvailabilityLine $developmentImageNotice `
+            -LineEnding $lineEnding `
+            -Rolling $true
         $nextHistorySection =
             "$nextDevelopmentHeading$lineEnding$lineEnding" +
             "- No changes yet.$lineEnding$lineEnding" +
+            "$nextDockerSection$lineEnding$lineEnding" +
             $stableHeadingLine
         $updatedReadme = $updatedReadme.Replace($stableHeadingLine, $nextHistorySection)
         Set-Utf8Text "README.md" $updatedReadme
