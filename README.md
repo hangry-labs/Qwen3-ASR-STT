@@ -330,7 +330,7 @@ task release DRY_RUN=1
 task release
 ```
 
-The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates the release commit and annotated `vX.Y.Z` tag, prepares the next minor snapshot commit, then atomically pushes `main` and the release tag to `origin`. GitHub Actions remains solely responsible for publishing Docker images. Use `NEXT_VERSION=0.2.1-snapshot` to override the default `0.3.0-snapshot` next-minor version, or `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when dependency-backed or runtime verification is required.
+The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates the release commit and annotated `vX.Y.Z` tag, prepares the next minor snapshot commit and README history section, then atomically pushes `main` and the release tag to `origin`. GitHub Actions remains solely responsible for publishing Docker images. Pass an explicit newer `NEXT_VERSION=X.Y.Z-snapshot` to override the default next-minor snapshot, or use `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when dependency-backed or runtime verification is required.
 
 Stop containers:
 
@@ -358,6 +358,10 @@ task benchmark-transcription-06b
 The benchmark scores focus on transcription meaning. Punctuation, quote recovery, and expressive marks are counted as bonus signal rather than required exact text.
 
 ## Version History
+
+### v0.3.0 (in development)
+
+- No changes yet.
 
 ### v0.2.0
 

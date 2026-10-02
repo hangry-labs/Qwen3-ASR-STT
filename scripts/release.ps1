@@ -113,6 +113,8 @@ if ([version]$nextReleaseVersion -le [version]$releaseVersion) {
     throw "NEXT_VERSION '$nextSnapshotVersion' must be newer than '$releaseVersion'."
 }
 $nextProjectVersion = "$nextReleaseVersion.dev0"
+$nextDevelopmentHeading = "### v$nextReleaseVersion (in development)"
+$nextDevelopmentHeadingPattern = '(?m)^' + [regex]::Escape($nextDevelopmentHeading) + '\r?$'
 
 $readme = Get-Content -Raw -LiteralPath "README.md"
 $stableHeading = "### $releaseTag"
@@ -219,7 +221,29 @@ Invoke-Step "Commit release metadata when needed and tag $releaseTag" {
 Invoke-Step "Prepare $nextSnapshotVersion" {
     Set-Utf8Text "VERSION" "$nextSnapshotVersion`n"
     Set-ProjectVersion $nextProjectVersion
-    Invoke-Native "Stage next snapshot metadata" { git add -- VERSION pyproject.toml }
+
+    $updatedReadme = Get-Content -Raw -LiteralPath "README.md"
+    if (-not [regex]::IsMatch($updatedReadme, $nextDevelopmentHeadingPattern)) {
+        $stableHeadingMatches = [regex]::Matches($updatedReadme, $stableHeadingPattern)
+        if ($stableHeadingMatches.Count -ne 1) {
+            throw "README.md must contain exactly one '$stableHeading' heading before preparing the next snapshot."
+        }
+
+        $lineEnding = if ($updatedReadme.Contains("`r`n")) { "`r`n" } else { "`n" }
+        $stableHeadingLine = "$stableHeading$lineEnding"
+        if (-not $updatedReadme.Contains($stableHeadingLine)) {
+            throw "README.md release heading '$stableHeading' is not followed by a line ending."
+        }
+
+        $nextHistorySection =
+            "$nextDevelopmentHeading$lineEnding$lineEnding" +
+            "- No changes yet.$lineEnding$lineEnding" +
+            $stableHeadingLine
+        $updatedReadme = $updatedReadme.Replace($stableHeadingLine, $nextHistorySection)
+        Set-Utf8Text "README.md" $updatedReadme
+    }
+
+    Invoke-Native "Stage next snapshot metadata" { git add -- VERSION pyproject.toml README.md }
     Invoke-Native "Create next snapshot commit" { git commit -m "chore: start $nextSnapshotVersion" }
 }
 
