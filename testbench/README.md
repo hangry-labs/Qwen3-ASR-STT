@@ -65,3 +65,7 @@ The runner appends benchmark markdown results under:
 ```text
 benchmarks/transcription/
 ```
+
+Each result records the GPU name, memory, driver, and UUID discovered with `nvidia-smi`. Official Taskfile runs pass `GPU_DEVICE` to both the deployment and benchmark recorder so the reported hardware matches the GPU selected for inference.
+
+Performance results are measured end to end through the HTTP API and include total measured time, audio duration, mean/median/p95 request latency, real-time factor (RTF), and audio throughput as a multiple of realtime. Fixture duration probing happens before the timed benchmark window and requires `ffprobe`. Lower RTF and latency are better; higher realtime speed is better.

@@ -2,7 +2,7 @@
 
 Each benchmark run appends a section with representative best and worst examples.
 
-This benchmark uses the random-only testbench corpus: 30 Qwen3-ASR-supported languages, 10 samples per language, 300 cases total. Each official run starts with 10 mandatory prewarm inferences; prewarm results and time are discarded. Official timing records the measured benchmark run only. Expected and actual examples bold the differing spans so regressions are easier to inspect.
+This benchmark uses the random-only testbench corpus: 30 Qwen3-ASR-supported languages, 10 samples per language, 300 cases total. Each official run starts with 10 mandatory prewarm inferences; prewarm results and time are discarded. Official timing records the measured benchmark run only. New runs record the GPU discovered with `nvidia-smi` plus end-to-end request latency, audio duration, real-time factor, and realtime throughput. Expected and actual examples bold the differing spans so regressions are easier to inspect.
 
 ## 15.05.2026 18:46:00 - Qwen/Qwen3-ASR-0.6B
 
@@ -1156,6 +1156,114 @@ This benchmark uses the random-only testbench corpus: 30 Qwen3-ASR-supported lan
 - Total score: `96.05%`
 - Bonus: `0.41%`
 - Total time: `32.401s`
+- Cases: `300`
+
+### Best Examples
+
+#### chinese_random_04 - 102.50%
+
+- Language: `Chinese`
+- Expected: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+- Actual: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+
+#### chinese_random_05 - 102.50%
+
+- Language: `Chinese`
+- Expected: 我不是拖延症，我只是给灵感一点自由活动时间。
+- Actual: 我不是拖延症，我只是给灵感一点自由活动时间。
+
+#### chinese_random_06 - 102.50%
+
+- Language: `Chinese`
+- Expected: **电梯到了，门一开，尴尬也一起上来了。 [sigh] 尴尬还按了最近的楼层。**
+- Actual: **电梯到了，门一开，尴尬也一起上来了。尴尬还按了最近的楼层。**
+
+### Worst Examples
+
+#### hungarian_random_03 - 70.13%
+
+- Language: `Hungarian`
+- Expected: **Ebéd** **után sétáltunk** egyet a folyó mellett.
+- Actual: **Ebből** **tanítjuk** egyet a folyó mellett.
+
+#### cantonese_random_02 - 71.25%
+
+- Language: `Cantonese`
+- Expected: 我**買**咗一杯**熱**奶茶，坐喺窗**邊聽**雨**聲**。
+- Actual: 我**买**咗一杯**热**奶茶，坐喺窗**边听**雨**声**。
+
+#### cantonese_random_06 - 71.25%
+
+- Language: `Cantonese`
+- Expected: **廚**房**傳**嚟**飯**香，大家都自然行近**張枱**。
+- Actual: **厨**房**传**嚟**饭**香，大家都自然行近**张台**。
+
+
+## 02.10.2026 16:26:54 - Qwen/Qwen3-ASR-0.6B-hf
+
+- Version: `0.3.0-snapshot`
+- GPU: `NVIDIA GeForce RTX 5070 Ti (index 0, 16303 MiB, driver 610.88, GPU-1e924b6b-3d80-bedf-061e-ea4fd7ed892c)`
+- Comment: `RTX 5070 Ti; vLLM 0.26.0; default integrated UI/API profile`
+- Total score: `96.10%`
+- Bonus: `0.41%`
+- Total time: `32.403s`
+- Cases: `300`
+
+### Best Examples
+
+#### chinese_random_04 - 102.50%
+
+- Language: `Chinese`
+- Expected: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+- Actual: 人生就像火锅，别急着下结论，先看看谁被烫到了。
+
+#### chinese_random_05 - 102.50%
+
+- Language: `Chinese`
+- Expected: 我不是拖延症，我只是给灵感一点自由活动时间。
+- Actual: 我不是拖延症，我只是给灵感一点自由活动时间。
+
+#### chinese_random_06 - 102.50%
+
+- Language: `Chinese`
+- Expected: **电梯到了，门一开，尴尬也一起上来了。 [sigh] 尴尬还按了最近的楼层。**
+- Actual: **电梯到了，门一开，尴尬也一起上来了。尴尬还按了最近的楼层。**
+
+### Worst Examples
+
+#### hungarian_random_03 - 70.13%
+
+- Language: `Hungarian`
+- Expected: **Ebéd** **után sétáltunk** egyet a folyó mellett.
+- Actual: **Ebből** **tanítjuk** egyet a folyó mellett.
+
+#### cantonese_random_02 - 71.25%
+
+- Language: `Cantonese`
+- Expected: 我**買**咗一杯**熱**奶茶，坐喺窗**邊聽**雨**聲**。
+- Actual: 我**买**咗一杯**热**奶茶，坐喺窗**边听**雨**声**。
+
+#### cantonese_random_06 - 71.25%
+
+- Language: `Cantonese`
+- Expected: **廚**房**傳**嚟**飯**香，大家都自然行近**張枱**。
+- Actual: **厨**房**传**嚟**饭**香，大家都自然行近**张台**。
+
+
+## 02.10.2026 16:38:04 - Qwen/Qwen3-ASR-0.6B-hf
+
+- Version: `0.3.0-snapshot`
+- GPU: `NVIDIA GeForce RTX 5070 Ti (index 0, 16303 MiB, driver 610.88, GPU-1e924b6b-3d80-bedf-061e-ea4fd7ed892c)`
+- Comment: `RTX 5070 Ti; vLLM 0.26.0; default integrated UI/API profile; end-to-end performance metrics`
+- Total score: `96.10%`
+- Bonus: `0.41%`
+- Total time: `32.376s`
+- Audio duration: `1320.936s`
+- Mean request latency: `0.108s`
+- Median request latency: `0.098s`
+- P95 request latency: `0.176s`
+- Real-time factor: `0.0245`
+- Realtime speed: `40.80x`
 - Cases: `300`
 
 ### Best Examples

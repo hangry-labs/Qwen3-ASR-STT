@@ -5,6 +5,8 @@ import json
 import mimetypes
 import os
 import re
+import statistics
+import subprocess
 import time
 import tomllib
 import urllib.error
@@ -67,10 +69,19 @@ def _language_columns(manifest: dict[str, Any], cases: list[dict[str, Any]]) -> 
 def _ensure_summary_md(path: Path, language_columns: list[str]) -> None:
     if path.exists() and path.read_text(encoding="utf-8").strip():
         _ensure_summary_comment_column(path)
+        _ensure_summary_gpu_column(path)
+        _ensure_summary_performance_columns(path)
         return
 
-    headers = ["Version", "Model", "Comment", "Test time", "Total score %", "Bonus %", "Total time", *language_columns]
-    aligns = ["---", "---", "---", "---", "---:", "---:", "---", *(["---:"] * len(language_columns))]
+    headers = [
+        "Version", "Model", "GPU", "Comment", "Test time", "Total score %", "Bonus %",
+        "Total time", "Audio duration", "Mean request", "P95 request", "RTF", "Realtime speed",
+        *language_columns,
+    ]
+    aligns = [
+        "---", "---", "---", "---", "---", "---:", "---:", "---:", "---:", "---:",
+        "---:", "---:", "---:", *(["---:"] * len(language_columns)),
+    ]
     content = [
         "# Qwen3-ASR Transcription Benchmarks",
         "",
@@ -92,6 +103,27 @@ def _join_md_row(cells: list[str]) -> str:
 
 
 def _ensure_summary_comment_column(path: Path) -> None:
+    _ensure_summary_column(path, "Comment", "Model")
+
+
+def _ensure_summary_gpu_column(path: Path) -> None:
+    _ensure_summary_column(path, "GPU", "Model", legacy_value="Unknown (legacy run)")
+
+
+def _ensure_summary_performance_columns(path: Path) -> None:
+    previous = "Total time"
+    for column in ("Audio duration", "Mean request", "P95 request", "RTF", "Realtime speed"):
+        _ensure_summary_column(path, column, previous, legacy_value="Unknown (legacy run)", numeric=True)
+        previous = column
+
+
+def _ensure_summary_column(
+    path: Path,
+    column: str,
+    after: str,
+    legacy_value: str = "",
+    numeric: bool = False,
+) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     header_index = next(
         (index for index, line in enumerate(lines) if line.startswith("|") and "Version" in line and "Model" in line),
@@ -100,25 +132,25 @@ def _ensure_summary_comment_column(path: Path) -> None:
     if header_index is None:
         return
     headers = _split_md_row(lines[header_index])
-    if "Comment" in headers:
+    if column in headers:
         return
     try:
-        model_index = headers.index("Model")
+        after_index = headers.index(after)
     except ValueError:
         return
-    insert_index = model_index + 1
+    insert_index = after_index + 1
     for index in range(header_index, len(lines)):
         if not lines[index].startswith("|"):
             continue
         cells = _split_md_row(lines[index])
-        if len(cells) <= insert_index:
+        if len(cells) < insert_index:
             continue
         if index == header_index:
-            cells.insert(insert_index, "Comment")
+            cells.insert(insert_index, column)
         elif index == header_index + 1:
-            cells.insert(insert_index, "---")
+            cells.insert(insert_index, "---:" if numeric else "---")
         else:
-            cells.insert(insert_index, "")
+            cells.insert(insert_index, legacy_value)
         lines[index] = _join_md_row(cells)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -160,6 +192,118 @@ def _project_version(start: Path) -> str:
             if value:
                 return str(value)
     return "unknown"
+
+
+def _detect_gpu(requested_index: int | None = None) -> dict[str, Any] | None:
+    try:
+        completed = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,uuid,memory.total,driver_version",
+                "--format=csv,noheader,nounits",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+    devices: list[dict[str, Any]] = []
+    for line in completed.stdout.splitlines():
+        cells = [cell.strip() for cell in line.split(",", maxsplit=4)]
+        if len(cells) != 5:
+            continue
+        try:
+            index = int(cells[0])
+            memory_total_mib = int(cells[3])
+        except ValueError:
+            continue
+        devices.append(
+            {
+                "index": index,
+                "name": cells[1],
+                "uuid": cells[2],
+                "memory_total_mib": memory_total_mib,
+                "driver_version": cells[4],
+            }
+        )
+
+    if requested_index is not None:
+        return next((device for device in devices if device["index"] == requested_index), None)
+    if len(devices) == 1:
+        return devices[0]
+    return None
+
+
+def _gpu_label(gpu: dict[str, Any] | None) -> str:
+    if not gpu:
+        return "Not detected"
+    return f"{gpu['name']} ({gpu['memory_total_mib']} MiB)"
+
+
+def _gpu_details(gpu: dict[str, Any] | None) -> str:
+    if not gpu:
+        return "Not detected"
+    return (
+        f"{gpu['name']} (index {gpu['index']}, {gpu['memory_total_mib']} MiB, "
+        f"driver {gpu['driver_version']}, {gpu['uuid']})"
+    )
+
+
+def _audio_duration_seconds(path: Path) -> float | None:
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        duration = float(completed.stdout.strip())
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+        return None
+    return duration if duration > 0 else None
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+
+def _performance_metrics(results: list[dict[str, Any]], elapsed_sec: float) -> dict[str, Any]:
+    latencies = [float(item["elapsed_sec"]) for item in results if item.get("elapsed_sec") is not None]
+    durations = [float(item["audio_duration_sec"]) for item in results if item.get("audio_duration_sec") is not None]
+    complete_audio_duration = len(durations) == len(results) and bool(results)
+    audio_duration_sec = sum(durations) if complete_audio_duration else None
+    realtime_factor = elapsed_sec / audio_duration_sec if audio_duration_sec else None
+    realtime_speed = audio_duration_sec / elapsed_sec if audio_duration_sec and elapsed_sec > 0 else None
+    return {
+        "audio_duration_sec": round(audio_duration_sec, 3) if audio_duration_sec is not None else None,
+        "audio_duration_cases": len(durations),
+        "mean_request_sec": round(statistics.fmean(latencies), 3) if latencies else None,
+        "median_request_sec": round(statistics.median(latencies), 3) if latencies else None,
+        "p95_request_sec": round(_percentile(latencies, 0.95) or 0.0, 3) if latencies else None,
+        "realtime_factor": round(realtime_factor, 4) if realtime_factor is not None else None,
+        "realtime_speed": round(realtime_speed, 2) if realtime_speed is not None else None,
+    }
+
+
+def _metric(value: float | None, suffix: str, digits: int) -> str:
+    if value is None:
+        return "Unavailable"
+    return f"{value:.{digits}f}{suffix}"
 
 
 def _diff_tokens(value: str) -> list[str]:
@@ -223,13 +367,21 @@ def _multipart_request(url: str, fields: dict[str, str], file_path: Path, timeou
     return json.loads(payload)
 
 
-def _run_case(endpoint: str, model: str, root: Path, case: dict[str, Any], request_timeout: float) -> dict[str, Any]:
+def _run_case(
+    endpoint: str,
+    model: str,
+    root: Path,
+    case: dict[str, Any],
+    request_timeout: float,
+    audio_duration_sec: float | None,
+) -> dict[str, Any]:
     audio_path = root / case["audio"]
     expected = case["expected_text"]
     item = {
         "id": case["id"],
         "language": case["language"],
         "audio": case["audio"],
+        "audio_duration_sec": round(audio_duration_sec, 3) if audio_duration_sec is not None else None,
         "expected_text": expected,
         "actual_text": "",
         "exact_match": False,
@@ -237,7 +389,7 @@ def _run_case(endpoint: str, model: str, root: Path, case: dict[str, Any], reque
         "error": "",
         "elapsed_sec": None,
     }
-    t0 = time.time()
+    t0 = time.perf_counter()
     try:
         response = _multipart_request(
             endpoint,
@@ -260,7 +412,7 @@ def _run_case(endpoint: str, model: str, root: Path, case: dict[str, Any], reque
     except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
         item["error"] = str(exc)
     finally:
-        item["elapsed_sec"] = round(time.time() - t0, 3)
+        item["elapsed_sec"] = round(time.perf_counter() - t0, 3)
     return item
 
 
@@ -278,9 +430,20 @@ def main() -> int:
     parser.add_argument("--summary-md", default="benchmarks/transcription/BENCHMARKS.md")
     parser.add_argument("--details-md", default="benchmarks/transcription/DETAILS.md")
     parser.add_argument("--comment", default=os.environ.get("BENCHMARK_COMMENT", ""))
+    parser.add_argument(
+        "--gpu-index",
+        type=int,
+        default=None,
+        help="Host GPU index used by the service; a single installed GPU is detected automatically",
+    )
     parser.add_argument("--no-append", action="store_true")
     parser.add_argument("--strict-exit", action="store_true")
     args = parser.parse_args()
+
+    gpu = _detect_gpu(args.gpu_index)
+    if args.gpu_index is not None and gpu is None:
+        parser.error(f"GPU index {args.gpu_index} was not found by nvidia-smi")
+    print(f"GPU {_gpu_details(gpu)}", flush=True)
 
     manifest_path = Path(args.manifest)
     root = manifest_path.parent
@@ -291,22 +454,43 @@ def main() -> int:
     if args.limit > 0:
         cases = cases[: args.limit]
 
+    audio_durations = {
+        case["id"]: _audio_duration_seconds(root / case["audio"])
+        for case in cases
+    }
+    discovered_durations = sum(duration is not None for duration in audio_durations.values())
+    print(f"AUDIO DURATIONS discovered={discovered_durations}/{len(cases)}", flush=True)
+
     endpoint = args.base_url.rstrip("/") + "/v1/audio/transcriptions"
     prewarm_results = []
-    prewarm_started = time.time()
+    prewarm_started = time.perf_counter()
     prewarm_cases = cases[: args.prewarm] if args.prewarm > 0 else []
     for case in prewarm_cases:
-        item = _run_case(endpoint, args.model, root, case, args.request_timeout)
+        item = _run_case(
+            endpoint,
+            args.model,
+            root,
+            case,
+            args.request_timeout,
+            audio_durations.get(case["id"]),
+        )
         prewarm_results.append(item)
         status = "OK" if not item.get("error") else "ERR"
         print(f"PREWARM {status} {case['id']} {item['elapsed_sec']}s", flush=True)
-    prewarm_elapsed = round(time.time() - prewarm_started, 3) if prewarm_cases else 0.0
+    prewarm_elapsed = round(time.perf_counter() - prewarm_started, 3) if prewarm_cases else 0.0
 
     results = []
     print(f"MEASURE START cases={len(cases)} prewarm_discarded={len(prewarm_results)}", flush=True)
-    started = time.time()
+    started = time.perf_counter()
     for case in cases:
-        item = _run_case(endpoint, args.model, root, case, args.request_timeout)
+        item = _run_case(
+            endpoint,
+            args.model,
+            root,
+            case,
+            args.request_timeout,
+            audio_durations.get(case["id"]),
+        )
         results.append(item)
         status = "PASS" if item.get("total_score", 0.0) >= 90.0 else "FAIL"
         print(f"{status} {case['id']} {item.get('total_score', 0.0)}% {item['elapsed_sec']}s", flush=True)
@@ -321,11 +505,22 @@ def main() -> int:
         language: round(sum(values) / len(values), 2)
         for language, values in sorted(by_language.items())
     }
+    elapsed_sec = round(time.perf_counter() - started, 3)
+    performance = _performance_metrics(results, elapsed_sec)
+    print(
+        "PERFORMANCE "
+        f"mean={_metric(performance['mean_request_sec'], 's', 3)} "
+        f"p95={_metric(performance['p95_request_sec'], 's', 3)} "
+        f"rtf={_metric(performance['realtime_factor'], '', 4)} "
+        f"speed={_metric(performance['realtime_speed'], 'x', 2)}",
+        flush=True,
+    )
     output = {
         "base_url": args.base_url,
         "manifest": str(manifest_path),
         "version": _project_version(manifest_path.parent),
         "model": args.model_label or args.model,
+        "gpu": gpu,
         "total": len(results),
         "passed": passed,
         "failed": len(results) - passed,
@@ -337,7 +532,8 @@ def main() -> int:
             "elapsed_sec": prewarm_elapsed,
             "results": prewarm_results,
         },
-        "elapsed_sec": round(time.time() - started, 3),
+        "elapsed_sec": elapsed_sec,
+        "performance": performance,
         "results": results,
     }
     output_path = Path(args.output)
@@ -359,9 +555,14 @@ def main() -> int:
             summary_md,
             (
                 f"| {_md_escape(output['version'])} | {_md_escape(args.model_label or args.model)} | "
-                f"{_md_escape(args.comment)} | {run_time} | "
+                f"{_md_escape(_gpu_label(gpu))} | {_md_escape(args.comment)} | {run_time} | "
                 f"{output['total_score']:.2f}% | {output['bonus']:.2f}% | "
                 f"{output['elapsed_sec']:.3f}s | "
+                f"{_metric(performance['audio_duration_sec'], 's', 3)} | "
+                f"{_metric(performance['mean_request_sec'], 's', 3)} | "
+                f"{_metric(performance['p95_request_sec'], 's', 3)} | "
+                f"{_metric(performance['realtime_factor'], '', 4)} | "
+                f"{_metric(performance['realtime_speed'], 'x', 2)} | "
                 f"{' | '.join(_md_escape(value) for value in language_cells)} |\n"
             ),
         )
@@ -373,10 +574,17 @@ def main() -> int:
             f"## {run_time} - {args.model_label or args.model}",
             "",
             f"- Version: `{output['version']}`",
+            f"- GPU: `{_gpu_details(gpu)}`",
             f"- Comment: `{args.comment}`" if args.comment else "- Comment: ``",
             f"- Total score: `{output['total_score']:.2f}%`",
             f"- Bonus: `{output['bonus']:.2f}%`",
             f"- Total time: `{output['elapsed_sec']:.3f}s`",
+            f"- Audio duration: `{_metric(performance['audio_duration_sec'], 's', 3)}`",
+            f"- Mean request latency: `{_metric(performance['mean_request_sec'], 's', 3)}`",
+            f"- Median request latency: `{_metric(performance['median_request_sec'], 's', 3)}`",
+            f"- P95 request latency: `{_metric(performance['p95_request_sec'], 's', 3)}`",
+            f"- Real-time factor: `{_metric(performance['realtime_factor'], '', 4)}`",
+            f"- Realtime speed: `{_metric(performance['realtime_speed'], 'x', 2)}`",
             f"- Cases: `{output['total']}`",
             "",
             "### Best Examples",

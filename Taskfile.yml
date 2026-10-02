@@ -214,13 +214,13 @@ tasks:
   quality-smoke:
     desc: Run a small OpenAI-compatible transcription quality smoke test against the running API
     cmds:
-      - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit 2 --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --no-append'
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit 2 --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --gpu-index {{.GPU_DEVICE}} --no-append'
 
   benchmark-transcription:
     desc: Run transcription quality benchmark and append markdown summaries
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/wait_openai_health.ps1 -BaseUrl {{.QUALITY_BASE_URL}} -ExpectedModel "{{.QUALITY_MODEL_LABEL}}" -TimeoutSeconds {{.HEALTH_TIMEOUT_SECONDS}}
-      - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --comment "{{.BENCHMARK_COMMENT}}"'
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --gpu-index {{.GPU_DEVICE}} --comment "{{.BENCHMARK_COMMENT}}"'
 
   deploy-api-06b:
     desc: Start full UI/API service with Qwen3-ASR 0.6B and wait for health
@@ -254,13 +254,13 @@ tasks:
     desc: Deploy 0.6B full UI/API service, wait for health, then run official transcription benchmark
     cmds:
       - task deploy-api-06b
-      - 'cmd /c python "testbench\run_openai_quality.py" --base-url http://127.0.0.1:8000 --model qwen3-asr --model-label "Qwen/Qwen3-ASR-0.6B-hf" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --comment "{{.BENCHMARK_COMMENT}}"'
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url http://127.0.0.1:8000 --model qwen3-asr --model-label "Qwen/Qwen3-ASR-0.6B-hf" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --gpu-index {{.GPU_DEVICE}} --comment "{{.BENCHMARK_COMMENT}}"'
 
   benchmark-transcription-17b:
     desc: Deploy 1.7B full UI/API service, wait for health, then run official transcription benchmark
     cmds:
       - task deploy-api-17b
-      - 'cmd /c python "testbench\run_openai_quality.py" --base-url http://127.0.0.1:8000 --model qwen3-asr --model-label "Qwen/Qwen3-ASR-1.7B-hf" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --comment "{{.BENCHMARK_COMMENT}}"'
+      - 'cmd /c python "testbench\run_openai_quality.py" --base-url http://127.0.0.1:8000 --model qwen3-asr --model-label "Qwen/Qwen3-ASR-1.7B-hf" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --gpu-index {{.GPU_DEVICE}} --comment "{{.BENCHMARK_COMMENT}}"'
 
   imagestop:
     desc: Stop running Qwen3-ASR-STT containers
