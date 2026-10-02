@@ -8,13 +8,13 @@ from typing import Any, Dict
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from qwen_asr.server.openai_api import create_app as create_openai_app
 from qwen_asr.server.startup_warmup import run_startup_warmup
 from qwen_asr.startup_logging import StartupTimer, log_startup
-from qwen_asr.web.gpu import gpu_monitor_html
+from qwen_asr.web.gpu import GPU_MONITOR
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -99,8 +99,8 @@ def create_app(*, api_app: FastAPI) -> FastAPI:
         return {"examples": _example_catalog()}
 
     @api_app.get("/system/gpu", include_in_schema=False)
-    async def gpu() -> HTMLResponse:
-        return HTMLResponse(gpu_monitor_html())
+    def gpu() -> JSONResponse:
+        return JSONResponse(GPU_MONITOR.request_snapshot(), headers={"Cache-Control": "no-store"})
 
     return api_app
 

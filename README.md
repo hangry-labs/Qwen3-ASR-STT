@@ -93,7 +93,7 @@ The interface provides four focused views:
 - **Transcribe:** upload or record audio inside a replaceable waveform editor with playback, seeking, volume, speed, trimming, and download controls; load bundled multilingual examples without changing the selected language; choose the response format and inspect the raw response.
 - **Stream:** transcribe the microphone incrementally, finalize or reset a session, choose an input device, and use inline explanations for chunk and transcript-stability settings.
 - **API:** inspect health, model, language, and inference status from the same service.
-- **System:** inspect readiness, GPU utilization, and VRAM.
+- **System:** inspect readiness plus one-second GPU history for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Charts support timestamped hover inspection and switchable one- or ten-minute windows; recent history survives a browser reload.
 
 The header reports the active model, inference readiness, and UI build version. Word and segment timestamp controls check forced-aligner availability immediately; the aligner remains disabled by default and the UI explains how to enable it when timestamps are requested.
 
@@ -361,7 +361,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ### v0.3.0 (in development)
 
-- No changes yet.
+- Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration.
+- Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
 
 Development images use the rolling tags published from `main`:
 
