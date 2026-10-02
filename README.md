@@ -359,7 +359,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ## Version History
 
-### v0.2.0 (in development)
+### v0.2.0
 
 - Synchronized the maintained Hangry Labs runtime with upstream Qwen3-ASR through upstream commit `7c6daf7`.
 - Migrated the runtime to the upstream Hugging Face Qwen3-ASR and forced-aligner implementations.
