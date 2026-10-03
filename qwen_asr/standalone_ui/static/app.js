@@ -15,6 +15,8 @@ const state = {
   aligner: null,
   alignerBusy: false,
   alignerUnloadTimer: null,
+  timestampGranularities: [],
+  timestampSessionRestored: false,
   responseFormatBeforeTimestamps: null,
   gpuHistory: new Map(),
   gpuStats: [],
@@ -89,6 +91,9 @@ function persistUiSession() {
       activeTab: state.activeTab,
       headerCollapsed: state.headerCollapsed,
       gpuWindowMs: state.gpuWindowMs,
+      timestampGranularities: state.timestampSessionRestored
+        ? selectedTimestampGranularities()
+        : state.timestampGranularities,
     }))
   } catch {
     // Session storage is optional in privacy-restricted browsers.
@@ -112,6 +117,9 @@ function restoreSessionState() {
   if (['transcribe', 'stream', 'api', 'system'].includes(ui?.activeTab)) state.activeTab = ui.activeTab
   if (typeof ui?.headerCollapsed === 'boolean') state.headerCollapsed = ui.headerCollapsed
   if ([60 * 1000, 10 * 60 * 1000].includes(ui?.gpuWindowMs)) state.gpuWindowMs = ui.gpuWindowMs
+  if (Array.isArray(ui?.timestampGranularities)) {
+    state.timestampGranularities = ui.timestampGranularities.filter((value) => ['word', 'segment'].includes(value))
+  }
 
   const cached = readSessionJson(GPU_SESSION_KEY)
   const cutoff = Date.now() - GPU_HISTORY_RETENTION_MS
@@ -338,6 +346,22 @@ function timestampLanguageIssue(aligner = state.aligner) {
   return timestampLanguageOptionIssue($('#language')?.value, aligner)
 }
 
+function resetUnsupportedExampleForTimestamps(aligner = state.aligner) {
+  if (state.source !== 'upload') return null
+  const select = $('#example-select')
+  const option = select?.selectedOptions[0]
+  const language = option?.dataset.language
+  const issue = language ? timestampLanguageOptionIssue(language, aligner) : null
+  if (!issue) return null
+
+  uploadEditor.clear()
+  select.value = ''
+  $('#transcript-output').textContent = ''
+  $('#response-output').textContent = ''
+  setStatus('Choose a timestamp-compatible sample')
+  return `${language} example removed because its timestamps are unavailable. Choose another sample or upload audio in a supported language.`
+}
+
 function syncTimestampLanguageOptions(aligner = state.aligner) {
   const select = $('#language')
   if (!select) return
@@ -438,18 +462,65 @@ async function loadAlignerOnDemand() {
   if (state.aligner?.loaded) return state.aligner
   setAlignerBusy(true)
   updateTimestampAvailability({ ...state.aligner, configured: true, loaded: false, status: 'loading' })
+  setStatus('Loading timestamp aligner')
+  const statusPoll = setInterval(async () => {
+    try {
+      const aligner = await fetchJson('/system/aligner')
+      if (state.alignerBusy) updateTimestampAvailability(aligner)
+    } catch {
+      // The load request remains authoritative; transient status polling is optional.
+    }
+  }, 750)
   try {
     const aligner = await fetchJson('/system/aligner/load', { method: 'POST' })
     updateTimestampAvailability(aligner)
+    setStatus('Aligner ready', 'success')
     showToast('Forced aligner loaded. Timestamp output is ready.', 'success')
     return aligner
   } finally {
+    clearInterval(statusPoll)
     setAlignerBusy(false)
   }
 }
 
-$$('input[name="timestamp"]').forEach((input) => input.addEventListener('change', async () => {
+async function restoreTimestampSession() {
+  if (state.timestampSessionRestored) return
+  state.timestampSessionRestored = true
+  const saved = state.timestampGranularities
+  state.timestampGranularities = []
+  if (!saved.length) {
+    scheduleAlignerIdleUnload()
+    return
+  }
+
+  if (state.timestampsAvailable !== true || timestampLanguageIssue()) {
+    persistUiSession()
+    return
+  }
+  $$('input[name="timestamp"]').forEach((input) => {
+    input.checked = saved.includes(input.value)
+  })
   syncTimestampSelectionUi()
+  cancelAlignerIdleUnload()
+  if (!selectedTimestampGranularities().length || state.aligner?.loaded) return
+
+  try {
+    await loadAlignerOnDemand()
+  } catch (error) {
+    $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
+    syncTimestampSelectionUi()
+    persistUiSession()
+    showToast(errorMessage(error))
+    await refreshAlignerSettings().catch(() => {})
+  }
+}
+
+$$('input[name="timestamp"]').forEach((input) => input.addEventListener('change', async () => {
+  let resetMessage = null
+  if (input.checked) resetMessage = resetUnsupportedExampleForTimestamps()
+  syncTimestampSelectionUi()
+  persistUiSession()
+  if (resetMessage) showToast(resetMessage)
   if (!input.checked) {
     scheduleAlignerIdleUnload()
     return
@@ -459,6 +530,7 @@ $$('input[name="timestamp"]').forEach((input) => input.addEventListener('change'
   if (languageIssue) {
     input.checked = false
     syncTimestampSelectionUi()
+    persistUiSession()
     updateTimestampAvailability(state.aligner)
     showToast(languageIssue)
     return
@@ -470,6 +542,7 @@ $$('input[name="timestamp"]').forEach((input) => input.addEventListener('change'
   if (state.timestampsAvailable !== true) {
     input.checked = false
     syncTimestampSelectionUi()
+    persistUiSession()
     showToast(
       state.timestampsAvailable === false
         ? 'Timestamp output is unavailable because no forced-aligner model is configured.'
@@ -482,6 +555,7 @@ $$('input[name="timestamp"]').forEach((input) => input.addEventListener('change'
   } catch (error) {
     input.checked = false
     syncTimestampSelectionUi()
+    persistUiSession()
     showToast(errorMessage(error))
     await refreshAlignerSettings().catch(() => {})
   }
@@ -492,6 +566,7 @@ $('#language').addEventListener('change', () => {
   if (languageIssue && selectedTimestampGranularities().length) {
     $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
     syncTimestampSelectionUi()
+    persistUiSession()
     scheduleAlignerIdleUnload()
     showToast(languageIssue)
   }
@@ -745,7 +820,8 @@ $('#aligner-load-always').addEventListener('change', async (event) => {
     })
     if (!aligner.loaded) {
       $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
-      syncTimestampResponseFormat()
+      syncTimestampSelectionUi()
+      persistUiSession()
     }
     updateTimestampAvailability(aligner)
     showToast(enabled ? 'Aligner will remain loaded across restarts.' : 'Persistent aligner loading disabled and VRAM released.', 'success')
@@ -773,7 +849,8 @@ $('#aligner-unload-now').addEventListener('click', async () => {
   try {
     const aligner = await fetchJson('/system/aligner/unload', { method: 'POST' })
     $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
-    syncTimestampResponseFormat()
+    syncTimestampSelectionUi()
+    persistUiSession()
     updateTimestampAvailability(aligner)
     showToast('Forced aligner released from VRAM.', 'success')
   } catch (error) {
@@ -1058,13 +1135,17 @@ async function pollReadiness() {
     state.backendReady = readiness.status === 'ok'
     state.model = readiness.model || state.model
     $('#model-name').textContent = state.model
-    updateTimestampAvailability(readiness.capabilities?.forced_aligner || {
+    const aligner = readiness.capabilities?.forced_aligner || {
       configured: readiness.capabilities?.timestamps === true,
       loaded: readiness.capabilities?.timestamps_loaded === true,
       status: readiness.capabilities?.timestamps_loaded === true
         ? 'loaded'
         : readiness.capabilities?.timestamps === true ? 'unloaded' : 'unavailable',
-    })
+    }
+    if (!state.alignerBusy || aligner.loaded || aligner.status === 'error') {
+      updateTimestampAvailability(aligner)
+    }
+    await restoreTimestampSession()
     badge.dataset.state = state.backendReady ? 'ready' : 'starting'
     badge.querySelector('strong').textContent = state.backendReady ? 'Inference ready' : 'Inference starting'
     model.textContent = readiness.model || 'Qwen3-ASR'
@@ -1083,6 +1164,16 @@ async function pollReadiness() {
 }
 
 document.addEventListener('audio-error', (event) => showToast(errorMessage(event.detail)))
+document.addEventListener('keydown', (event) => {
+  const key = event.key.toLowerCase()
+  const hardReload = ((event.ctrlKey || event.metaKey) && event.shiftKey && key === 'r')
+    || ((event.ctrlKey || event.metaKey) && key === 'f5')
+  if (!hardReload) return
+  const ui = readSessionJson(UI_SESSION_KEY)
+  if (!ui || typeof ui !== 'object') return
+  delete ui.timestampGranularities
+  try { sessionStorage.setItem(UI_SESSION_KEY, JSON.stringify(ui)) } catch {}
+}, true)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopGpuMonitor()

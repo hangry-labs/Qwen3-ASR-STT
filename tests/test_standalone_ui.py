@@ -7,8 +7,8 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from qwen_asr.standalone_ui.server import _example_catalog, _read_version_file, create_app
-from qwen_asr.web.gpu import GpuMonitor, read_gpu_stats
+from qwen_asr.standalone_ui.gpu import GpuMonitor, read_gpu_stats
+from qwen_asr.standalone_ui.server import _example_catalog, _read_version_file, attach_ui
 
 
 class StandaloneUiTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class StandaloneUiTests(unittest.TestCase):
     def test_static_application_and_health_are_available(self) -> None:
         gpu_payload = {"gpus": [], "history": {}, "sample_interval_seconds": 1, "idle_timeout_seconds": 60}
         with patch("qwen_asr.standalone_ui.server.GPU_MONITOR.request_snapshot", return_value=gpu_payload):
-            with TestClient(create_app(api_app=self.backend_app())) as client:
+            with TestClient(attach_ui(api_app=self.backend_app())) as client:
                 index = client.get("/")
                 script = client.get("/static/app.js")
                 audio_editor = client.get("/static/audio-editor.js")
@@ -66,7 +66,7 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertNotIn('/assets/banner.jpg', index.text)
         self.assertNotIn('class="brand-lockup"', index.text)
         self.assertNotIn("qwen-highlight", index.text)
-        self.assertIn('id="timestamp-support"', index.text)
+        self.assertIn('id="timestamp-support" data-state="checking" role="status" aria-live="polite"', index.text)
         self.assertIn('id="aligner-load-always"', index.text)
         self.assertIn('id="aligner-load-now"', index.text)
         self.assertIn('id="aligner-unload-now"', index.text)
@@ -102,6 +102,10 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertIn("ALIGNER_IDLE_UNLOAD_MS = 60 * 1000", script.text)
         self.assertIn("function scheduleAlignerIdleUnload(", script.text)
         self.assertIn("function timestampLanguageIssue(", script.text)
+        self.assertIn("function resetUnsupportedExampleForTimestamps(", script.text)
+        self.assertIn("async function restoreTimestampSession(", script.text)
+        self.assertIn("timestampGranularities: state.timestampSessionRestored", script.text)
+        self.assertIn("setStatus('Aligner ready', 'success')", script.text)
         self.assertIn("/system/aligner/load", script.text)
         self.assertIn("/system/aligner/unload", script.text)
         self.assertIn("load_aligner_always", script.text)
@@ -147,7 +151,7 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertEqual(gpu.headers["cache-control"], "no-store")
         self.assertEqual(health.json(), {"status": "ready"})
 
-    @patch("qwen_asr.web.gpu.subprocess.run")
+    @patch("qwen_asr.standalone_ui.gpu.subprocess.run")
     def test_gpu_monitor_parses_nvidia_smi(self, run) -> None:
         run.return_value.returncode = 0
         run.return_value.stdout = (
@@ -166,7 +170,7 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertEqual(stats[0]["graphics_clock"], 2400)
         self.assertEqual(stats[0]["performance_state"], "P2")
 
-    @patch("qwen_asr.web.gpu.subprocess.run")
+    @patch("qwen_asr.standalone_ui.gpu.subprocess.run")
     def test_gpu_monitor_keeps_gpu_when_optional_values_are_unavailable(self, run) -> None:
         run.return_value.returncode = 0
         run.return_value.stdout = (
@@ -206,7 +210,7 @@ class StandaloneUiTests(unittest.TestCase):
 
     def test_development_assets_disable_browser_caching(self) -> None:
         with patch.dict("os.environ", {"QWEN_ASR_UI_DEV": "1"}):
-            with TestClient(create_app(api_app=self.backend_app())) as client:
+            with TestClient(attach_ui(api_app=self.backend_app())) as client:
                 index = client.get("/")
                 stylesheet = client.get("/static/styles.css")
                 logo = client.get("/assets/qwen3_asr_favicon.webp")
@@ -216,14 +220,14 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertEqual(logo.headers["cache-control"], "no-store")
 
     def test_ui_preserves_in_process_api_routes(self) -> None:
-        with TestClient(create_app(api_app=self.backend_app())) as client:
+        with TestClient(attach_ui(api_app=self.backend_app())) as client:
             response = client.get("/health")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ready"})
 
     def test_unknown_paths_return_not_found(self) -> None:
-        with TestClient(create_app(api_app=self.backend_app())) as client:
+        with TestClient(attach_ui(api_app=self.backend_app())) as client:
             response = client.get("/not-allowed")
 
         self.assertEqual(response.status_code, 404)

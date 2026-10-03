@@ -117,14 +117,14 @@ class DockerEntrypointTests(unittest.TestCase):
     def _fake_server_modules(captured: dict):
         fake_package = ModuleType("qwen_asr")
         fake_package.__path__ = []
-        fake_server = ModuleType("qwen_asr.standalone_ui")
+        fake_server = ModuleType("qwen_asr.server")
         fake_server.__path__ = []
-        fake_app = ModuleType("qwen_asr.standalone_ui.server")
+        fake_app = ModuleType("qwen_asr.server.application")
         fake_app.run_server = lambda **kwargs: captured.update(kwargs)
         return {
             "qwen_asr": fake_package,
-            "qwen_asr.standalone_ui": fake_server,
-            "qwen_asr.standalone_ui.server": fake_app,
+            "qwen_asr.server": fake_server,
+            "qwen_asr.server.application": fake_app,
         }
 
     def test_main_uses_vllm_06b_runtime_defaults(self):
@@ -148,7 +148,6 @@ class DockerEntrypointTests(unittest.TestCase):
     def test_main_starts_combined_server_with_native_aligner(self):
         captured = {}
         env = {
-            "QWEN_ASR_APP": "api",
             "QWEN_ASR_MODEL": "Qwen/Qwen3-ASR-1.7B-hf",
             "QWEN_ASR_ALIGNER_MODEL": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
             "QWEN_ASR_ENABLE_ALIGNER": "1",
@@ -169,6 +168,8 @@ class DockerEntrypointTests(unittest.TestCase):
         self.assertEqual(captured["aligner_kwargs"]["dtype"], "bfloat16")
         self.assertEqual(captured["aligner_kwargs"]["device_map"], "cuda:0")
         self.assertTrue(captured["aligner_kwargs"]["torch_compile"])
+        self.assertTrue(captured["aligner_kwargs"]["torch_compile_dynamic"])
+        self.assertFalse(captured["trace_requests"])
         self.assertEqual(captured["host"], "127.0.0.1")
         self.assertEqual(captured["port"], 8123)
 

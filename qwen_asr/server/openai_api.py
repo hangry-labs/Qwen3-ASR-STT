@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable
 
-import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -28,6 +27,7 @@ from qwen_asr.server.aligner_runtime import (
     RuntimeSettingsStore,
     aligner_language_capabilities,
 )
+from qwen_asr.server.contracts import ASRRuntime
 from qwen_asr.server.inference_runtime import (
     DEFAULT_INFERENCE_TIMEOUT_SECONDS,
     DEFAULT_QUEUE_TIMEOUT_SECONDS,
@@ -36,8 +36,7 @@ from qwen_asr.server.inference_runtime import (
     InferenceUnavailableError,
     schedule_process_recycle,
 )
-from qwen_asr.server.startup_warmup import run_startup_warmup
-from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
+from qwen_asr.startup_logging import optional_timer
 
 MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
 RESPONSE_FORMATS = {"json", "text", "verbose_json", "srt", "vtt"}
@@ -437,21 +436,9 @@ def _inference_http_exception(exc: InferenceUnavailableError) -> HTTPException:
     )
 
 
-def _coerce_special_types(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    coerced = dict(kwargs)
-    dtype = coerced.get("dtype")
-    if isinstance(dtype, str):
-        import torch
-
-        if not hasattr(torch, dtype):
-            raise ValueError(f"Unknown torch dtype: {dtype}")
-        coerced["dtype"] = getattr(torch, dtype)
-    return coerced
-
-
 def create_app(
     *,
-    asr: "Qwen3ASRModel",
+    asr: ASRRuntime,
     model_name: str,
     concurrency: int,
     trace_requests: bool = False,
@@ -1109,40 +1096,3 @@ def create_app(
         return {"languages": list(SUPPORTED_LANGUAGES)}
 
     return app
-
-
-def run_server(
-    *,
-    asr_checkpoint: str,
-    model_kwargs: Dict[str, Any] | None,
-    cuda_visible_devices: str,
-    host: str,
-    port: int,
-    concurrency: int,
-) -> None:
-    log_startup("OpenAI-compatible API startup entered")
-    if cuda_visible_devices.strip():
-        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices.strip()
-        log_startup(f"CUDA_VISIBLE_DEVICES set to {cuda_visible_devices.strip()}")
-
-    with StartupTimer("coerce model kwargs"):
-        resolved_model_kwargs = _coerce_special_types(model_kwargs or {})
-
-    with StartupTimer("import Qwen3ASRModel"):
-        from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
-
-    with StartupTimer("load native Transformers ASR model"):
-        asr = Qwen3ASRModel.from_pretrained(asr_checkpoint, **resolved_model_kwargs)
-
-    with StartupTimer("create FastAPI app"):
-        trace_requests = os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "y"}
-        app = create_app(
-            asr=asr,
-            model_name=asr_checkpoint,
-            concurrency=concurrency,
-            trace_requests=trace_requests,
-            startup_warmup=lambda: run_startup_warmup(asr),
-        )
-
-    log_startup(f"starting uvicorn on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)

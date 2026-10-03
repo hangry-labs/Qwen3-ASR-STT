@@ -10,6 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
+from qwen_asr.server.contracts import ASRRuntime
 from qwen_asr.startup_logging import log_startup
 
 
@@ -153,7 +154,7 @@ class AlignerRuntime:
     def __init__(
         self,
         *,
-        asr: Any,
+        asr: ASRRuntime,
         checkpoint: str | None,
         model_kwargs: dict[str, Any] | None,
         settings: RuntimeSettingsStore,

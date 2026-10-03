@@ -152,7 +152,6 @@ def main() -> int:
     port = os.getenv("PORT", "8000")
     ssl_certfile = _str_env("QWEN_ASR_SSL_CERTFILE") or _str_env("SSL_CERTFILE")
     ssl_keyfile = _str_env("QWEN_ASR_SSL_KEYFILE") or _str_env("SSL_KEYFILE")
-    ssl_verify = _enabled(os.getenv("QWEN_ASR_SSL_VERIFY"), default=True)
     backend = (os.getenv("QWEN_ASR_BACKEND", "vllm") or "vllm").strip().lower()
     asr_model = os.getenv("QWEN_ASR_MODEL", DEFAULT_ASR_MODEL)
     aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", DEFAULT_ALIGNER_MODEL)
@@ -160,6 +159,7 @@ def main() -> int:
     cuda_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES", "0")
     concurrency = os.getenv("QWEN_ASR_CONCURRENCY", DEFAULT_CONCURRENCY)
     aligner_kwargs = os.getenv("QWEN_ASR_ALIGNER_KWARGS")
+    trace_requests = _enabled(os.getenv("QWEN_ASR_TRACE_REQUESTS"), default=False)
 
     model_kwargs = _backend_kwargs(backend)
     aligner_kwargs_value = _json_arg(aligner_kwargs)
@@ -174,8 +174,9 @@ def main() -> int:
         ),
     }
     torch_compile_dynamic = _optional_bool_env("QWEN_ASR_TORCH_COMPILE_DYNAMIC")
-    if torch_compile_dynamic is not None:
-        resolved_aligner_kwargs["torch_compile_dynamic"] = torch_compile_dynamic
+    resolved_aligner_kwargs["torch_compile_dynamic"] = (
+        True if torch_compile_dynamic is None else torch_compile_dynamic
+    )
     if aligner_kwargs_value:
         resolved_aligner_kwargs.update(json.loads(aligner_kwargs_value[0]))
 
@@ -183,10 +184,10 @@ def main() -> int:
         f"configuration resolved: model={asr_model} backend={backend} "
         f"host={host} port={port} concurrency={concurrency} backend_kwargs={model_kwargs}"
     )
-    with StartupTimer("import combined browser UI/OpenAI API server"):
-        from qwen_asr.standalone_ui.server import run_server as run_ui
+    with StartupTimer("import product UI/API server"):
+        from qwen_asr.server.application import run_server
 
-    run_ui(
+    run_server(
         asr_checkpoint=asr_model,
         aligner_checkpoint=aligner_model or None,
         load_aligner_at_startup=_enabled(os.getenv("QWEN_ASR_ENABLE_ALIGNER"), default=False),
@@ -199,8 +200,8 @@ def main() -> int:
         port=int(port),
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
-        ssl_verify=ssl_verify,
         concurrency=int(concurrency),
+        trace_requests=trace_requests,
     )
     return 0
 

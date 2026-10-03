@@ -306,7 +306,10 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 This repository uses Taskfile workflows on the development workstation.
 
-Planned follow-up work is tracked in [docs/roadmap.md](docs/roadmap.md).
+The runtime is intentionally split by responsibility: `docker_entrypoint.py` resolves deployment
+configuration, `server/application.py` assembles and serves the product, `server/openai_api.py`
+owns API behavior, `standalone_ui/` owns browser routes and assets, and `inference/` contains the
+model adapters. The supported application is always the combined Docker UI/API service.
 
 Build the full image:
 
@@ -391,7 +394,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Refined microphone workflows with automatic example loading, single-button record/stop controls for both recorded and realtime audio, responsive recording waveforms, aligned device refresh controls, and clearer recording status placement.
 - Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration.
 - Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
-- Planned before release: Review and reorganize the implementation, remove code and dependencies that no longer serve the Docker UI/API product, and improve internal boundaries while preserving behavior.
+- Reorganized runtime composition into a dedicated product application layer, limited the browser and API modules to their own responsibilities, colocated GPU telemetry with the UI, removed the obsolete API-only launcher and direct-library input/export compatibility paths, and pruned seven unused packages from the locked Docker dependency set.
+- Polished forced-alignment workflows with timestamp choice restoration during ordinary page refreshes, automatic removal of incompatible examples, live load-completion feedback, tokenizer preloading, and dynamic-shape compilation to avoid first-use recompilation when audio or alignment language changes.
 
 Development images use the rolling tags published from `main`:
 

@@ -13,33 +13,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-qwen_asr: Qwen3-ASR package.
-"""
+"""Qwen3-ASR Docker UI/API runtime package."""
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .inference.qwen3_asr import Qwen3ASRModel
-    from .inference.qwen3_forced_aligner import Qwen3ForcedAligner
-
-from .inference.utils import parse_asr_output
 
 try:
     __version__ = version("qwen-asr")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
-__all__ = ["Qwen3ASRModel", "Qwen3ForcedAligner", "parse_asr_output", "__version__"]
-
-
-def __getattr__(name: str):
-    if name == "Qwen3ASRModel":
-        from .inference.qwen3_asr import Qwen3ASRModel
-
-        return Qwen3ASRModel
-    if name == "Qwen3ForcedAligner":
-        from .inference.qwen3_forced_aligner import Qwen3ForcedAligner
-
-        return Qwen3ForcedAligner
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["__version__"]

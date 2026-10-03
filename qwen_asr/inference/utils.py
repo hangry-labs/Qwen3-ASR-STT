@@ -13,19 +13,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import base64
-import io
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Tuple, Union
-from urllib.parse import urlparse
 
 import librosa
 import numpy as np
-import soundfile as sf
 
 AudioLike = Union[
-    str,                      # wav path / URL / base64
+    str,                      # local audio path
     Tuple[np.ndarray, int],   # (waveform, sr)
 ]
 MaybeList = Union[Any, List[Any]]
@@ -110,41 +105,8 @@ def ensure_list(x: MaybeList) -> List[Any]:
         return x if isinstance(x, list) else [x]
 
 
-def is_url(s: str) -> bool:
-    try:
-        u = urlparse(s)
-        return u.scheme in ("http", "https") and bool(u.netloc)
-    except Exception:
-        return False
-
-
-def is_probably_base64(s: str) -> bool:
-    if s.startswith("data:audio"):
-        return True
-    if ("/" not in s and "\\" not in s) and len(s) > 256:
-        return True
-    return False
-
-
-def decode_base64_bytes(b64: str) -> bytes:
-    if "," in b64 and b64.strip().startswith("data:"):
-        b64 = b64.split(",", 1)[1]
-    return base64.b64decode(b64)
-
-
-def load_audio_any(x: str) -> Tuple[np.ndarray, int]:
-    if is_url(x):
-        with urllib.request.urlopen(x) as resp:
-            audio_bytes = resp.read()
-        with io.BytesIO(audio_bytes) as f:
-            audio, sr = sf.read(f, dtype="float32", always_2d=False)
-    elif is_probably_base64(x):
-        audio_bytes = decode_base64_bytes(x)
-        with io.BytesIO(audio_bytes) as f:
-            audio, sr = sf.read(f, dtype="float32", always_2d=False)
-    else:
-        audio, sr = librosa.load(x, sr=None, mono=False)
-
+def load_audio_file(path: str) -> Tuple[np.ndarray, int]:
+    audio, sr = librosa.load(path, sr=None, mono=False)
     audio = np.asarray(audio, dtype=np.float32)
     sr = int(sr)
     return audio, sr
@@ -180,7 +142,7 @@ def normalize_audio_input(a: AudioLike) -> np.ndarray:
     Normalize one audio input to mono 16k float32 waveform in [-1, 1].
 
     Supported inputs:
-        - str: local file path / https URL / base64 audio string
+        - str: local file path (uploads are persisted to a temporary file by the API)
         - (np.ndarray, sr): waveform and sampling rate
 
     Returns:
@@ -188,7 +150,7 @@ def normalize_audio_input(a: AudioLike) -> np.ndarray:
             Mono 16k float32 waveform in [-1, 1].
     """
     if isinstance(a, str):
-        audio, sr = load_audio_any(a)
+        audio, sr = load_audio_file(a)
     elif isinstance(a, tuple) and len(a) == 2 and isinstance(a[0], np.ndarray):
         audio, sr = a[0], int(a[1])
     else:

@@ -1,1 +1,1 @@
-"""Primary Qwen3-ASR browser interface."""
+"""Browser routes, assets, and UI-only runtime helpers."""
