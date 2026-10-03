@@ -87,7 +87,7 @@ The primary responsive browser UI runs on port 8000 alongside the OpenAI-compati
 The interface provides four focused views:
 
 - **Transcribe:** upload or record audio inside a replaceable waveform editor with playback, seeking, volume, speed, trimming, and download controls; load bundled multilingual examples without changing the selected language; choose the response format and inspect the raw response.
-- **Stream:** transcribe the microphone incrementally, finalize or reset a session, choose an input device, and use inline explanations for chunk and transcript-stability settings.
+- **Stream:** transcribe the microphone incrementally, finalize or reset a session, choose an input device, and tune the update interval, bounded audio window, and transcript-stability settings with inline explanations.
 - **API:** inspect health, model, language, and inference status from the same service.
 - **System:** inspect readiness plus one-second GPU history for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Charts support timestamped hover inspection and switchable one- or ten-minute windows; recent history survives a browser reload. The forced aligner can be loaded, released, or configured to remain loaded across restarts, and realtime defaults can be saved for future UI and API sessions.
 
@@ -97,7 +97,7 @@ The branded header reports the active model, inference readiness, and UI build v
   <img src="assets/ui.webp" alt="Qwen3-ASR-STT browser UI">
 </p>
 
-The Stream tab uses local realtime transcription sessions backed by repeated inference over accumulated audio through the configured backend. It is not a full OpenAI Realtime WebSocket implementation.
+The Stream tab uses local realtime transcription sessions backed by repeated inference over a bounded recent-audio window. Once the configurable window is full, older stable transcript tokens are retained outside the model prompt while the overlapping window continues to revise its latest words. This keeps inference cost and model context bounded during long sessions. It is not a full OpenAI Realtime WebSocket implementation.
 
 Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
 
@@ -248,6 +248,7 @@ The System tab writes the safe operator-controlled values to `/app/persistent/ap
   "load_aligner_always": false,
   "realtime_defaults": {
     "chunk_size_sec": 2.0,
+    "max_window_sec": 30.0,
     "unfixed_chunk_num": 2,
     "unfixed_token_num": 5
   }
@@ -398,12 +399,13 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Polished forced-alignment workflows with timestamp choice restoration during ordinary page refreshes, automatic removal of incompatible examples, live load-completion feedback, tokenizer preloading, and dynamic-shape compilation to avoid first-use recompilation when audio or alignment language changes.
 - Replaced quadratic forced-aligner timestamp repair with a stable O(N log N) implementation based on upstream PR [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215), preserving existing anchors and interpolation results.
 - Reproduced zero-duration lexical timestamps from [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) and added a model-score-aware constrained decoder fallback that preserves ordinary alignment output while resolving affected words into positive, monotonic spans.
+- Profiled the cumulative realtime path from [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199), reproduced 4.8× latency growth and a 74-second model-context failure, and replaced unbounded accumulation with a configurable stable rolling audio/transcript window. A 120-second regression now completes with a 30-second inference cap and stable post-window update latency.
 
 #### TODO
 
 - [x] Port and validate the stable O(N log N) forced-aligner timestamp repair from [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215).
 - [x] Reproduce and resolve zero-duration aligned words reported in [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) by selecting the highest-scoring valid boundary path instead of inventing timestamp offsets.
-- [ ] Profile realtime latency growth and investigate bounded or stable-window audio processing for [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199).
+- [x] Profile realtime latency growth and implement bounded stable-window audio/transcript processing for [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199).
 - [ ] Build a silence, noise, echo, and weak-speech regression set before deciding whether optional VAD should address [QwenLM/Qwen3-ASR#165](https://github.com/QwenLM/Qwen3-ASR/issues/165).
 - [ ] Measure prompt/context leakage from [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186) and improve UI guidance or limits before considering a separate hotword model.
 

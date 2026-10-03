@@ -30,15 +30,38 @@ class AlignerRuntimeTests(unittest.TestCase):
             store = RuntimeSettingsStore(path)
 
             saved = store.set_realtime_defaults(
-                {"chunk_size_sec": 1.25, "unfixed_chunk_num": 3, "unfixed_token_num": 8}
+                {
+                    "chunk_size_sec": 1.25,
+                    "max_window_sec": 20,
+                    "unfixed_chunk_num": 3,
+                    "unfixed_token_num": 8,
+                }
             )
 
             self.assertEqual(saved["chunk_size_sec"], 1.25)
             self.assertEqual(RuntimeSettingsStore(path).realtime_defaults(), saved)
             with self.assertRaises(ValueError):
                 store.set_realtime_defaults(
-                    {"chunk_size_sec": 0.1, "unfixed_chunk_num": 3, "unfixed_token_num": 8}
+                    {
+                        "chunk_size_sec": 0.1,
+                        "max_window_sec": 20,
+                        "unfixed_chunk_num": 3,
+                        "unfixed_token_num": 8,
+                    }
                 )
+
+    def test_legacy_realtime_defaults_gain_bounded_window_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(
+                '{"realtime_defaults":{"chunk_size_sec":1.25,"unfixed_chunk_num":3,"unfixed_token_num":8}}\n',
+                encoding="utf-8",
+            )
+
+            defaults = RuntimeSettingsStore(path).realtime_defaults()
+
+            self.assertEqual(defaults["chunk_size_sec"], 1.25)
+            self.assertEqual(defaults["max_window_sec"], 30.0)
 
     def test_lazy_load_warmup_and_unload_share_one_model_instance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

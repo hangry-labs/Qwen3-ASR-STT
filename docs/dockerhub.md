@@ -35,7 +35,7 @@ http://localhost:8000
   <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/assets/ui.webp" alt="Qwen3-ASR-STT browser UI">
 </p>
 
-The responsive UI provides file upload and browser recording, a replaceable waveform editor with playback and trimming controls, bundled multilingual examples, realtime microphone transcription, API status, and GPU monitoring. Model readiness and the UI build version are visible in a collapsible persistent header. Selecting Word or Segment timestamps loads the optional forced aligner on demand; the System tab can release it or persist an always-loaded preference.
+The responsive UI provides file upload and browser recording, a replaceable waveform editor with playback and trimming controls, bundled multilingual examples, bounded-window realtime microphone transcription, API status, and GPU monitoring. Model readiness and the UI build version are visible in a collapsible persistent header. Selecting Word or Segment timestamps loads the optional forced aligner on demand; the System tab can release it or persist an always-loaded preference.
 
 Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
 
@@ -153,7 +153,7 @@ Useful routes:
 - `POST /v1/realtime/transcriptions/sessions/{session_id}/finish`
 - `DELETE /v1/realtime/transcriptions/sessions/{session_id}`
 
-The realtime session API is local and experimental. It is used by the browser UI, but it is not a full OpenAI Realtime WebSocket implementation.
+The realtime session API is local and experimental. It repeatedly decodes a configurable recent-audio window and retains older stable transcript text outside the prompt, preventing inference latency and model context from growing without bound. It is used by the browser UI, but it is not a full OpenAI Realtime WebSocket implementation.
 
 ## Runtime Configuration
 
@@ -188,7 +188,7 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
   hangrylabs/qwen3-asr-stt:latest
 ```
 
-The single Qwen aligner supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. Other ASR languages, including Turkish, remain transcribable but cannot produce Qwen forced-alignment timestamps. Japanese alignment includes its required tokenizer. Korean transcription is supported, but Korean timestamp alignment is not packaged to avoid adding its GPLv3-only optional tokenizer to the Apache-2.0 image. Unsupported or unavailable forced-language requests return HTTP 422 before loading the aligner. The System tab also persists default chunk and transcript-stability values for new realtime sessions.
+The single Qwen aligner supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. Other ASR languages, including Turkish, remain transcribable but cannot produce Qwen forced-alignment timestamps. Japanese alignment includes its required tokenizer. Korean transcription is supported, but Korean timestamp alignment is not packaged to avoid adding its GPLv3-only optional tokenizer to the Apache-2.0 image. Unsupported or unavailable forced-language requests return HTTP 422 before loading the aligner. The System tab also persists the default chunk interval, maximum audio window, and transcript-stability values for new realtime sessions.
 
 Common knobs:
 
@@ -221,7 +221,7 @@ Common knobs:
 - `QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem`
 - `QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem`
 
-The System tab persists `load_aligner_always` plus the realtime `chunk_size_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
+The System tab persists `load_aligner_always` plus the realtime `chunk_size_sec`, `max_window_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. `max_window_sec` accepts 10–60 seconds and defaults to 30. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
 
 Startup warmup intentionally makes `/health` wait until vLLM compilation, CUDA graph capture, and three representative decode passes have stabilized the normal generation path. The first API transcription after readiness therefore does not pay lazy initialization cost.
 

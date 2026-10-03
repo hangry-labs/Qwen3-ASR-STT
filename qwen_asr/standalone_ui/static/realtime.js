@@ -29,6 +29,7 @@ export class RealtimeRecorder {
         prompt: options.prompt,
         temperature: 0,
         chunk_size_sec: options.chunkSize,
+        max_window_sec: options.maxWindow,
         unfixed_chunk_num: options.unfixedChunks,
         unfixed_token_num: options.unfixedTokens,
       }),

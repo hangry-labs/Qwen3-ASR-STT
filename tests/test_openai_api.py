@@ -68,6 +68,9 @@ class FakeASR:
                 "chunk_id": 0,
                 "buffer": np.zeros((0,), dtype=np.float32),
                 "chunk_size_samples": chunk_size_samples,
+                "max_window_sec": float(kwargs["max_window_sec"]),
+                "audio_accum": np.zeros((0,), dtype=np.float32),
+                "audio_samples_seen": 0,
             },
         )()
 
@@ -76,6 +79,8 @@ class FakeASR:
         state.buffer = np.concatenate([state.buffer, pcm16k])
         while len(state.buffer) >= state.chunk_size_samples:
             state.buffer = state.buffer[state.chunk_size_samples :]
+            state.audio_samples_seen += state.chunk_size_samples
+            state.audio_accum = np.zeros((state.audio_samples_seen,), dtype=np.float32)
             self.streaming_inference_calls += 1
             state.chunk_id += 1
             state.language = "English"
@@ -445,7 +450,12 @@ class OpenAIApiTests(unittest.TestCase):
 
             saved = client.put(
                 "/system/settings/realtime",
-                json={"chunk_size_sec": 1.25, "unfixed_chunk_num": 3, "unfixed_token_num": 8},
+                json={
+                    "chunk_size_sec": 1.25,
+                    "max_window_sec": 20,
+                    "unfixed_chunk_num": 3,
+                    "unfixed_token_num": 8,
+                },
             )
 
             self.assertEqual(saved.status_code, 200)
@@ -551,6 +561,8 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200)
         session_id = created.json()["id"]
         self.assertTrue(session_id.startswith("rt_"))
+        self.assertEqual(created.json()["max_window_sec"], 30.0)
+        self.assertEqual(asr.calls[0]["streaming_init"]["max_window_sec"], 30.0)
 
         first = client.post(
             f"/v1/realtime/transcriptions/sessions/{session_id}/audio",
@@ -559,6 +571,7 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.json()["text"], "")
         self.assertEqual(first.json()["chunk_id"], 0)
+        self.assertEqual(first.json()["audio_seconds"], 1.0)
         self.assertEqual(asr.streaming_inference_calls, 0)
 
         second = client.post(
@@ -568,6 +581,9 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.json()["text"], "streamed 1")
         self.assertEqual(second.json()["chunk_id"], 1)
+        self.assertEqual(second.json()["audio_seconds"], 2.0)
+        self.assertEqual(second.json()["inference_window_seconds"], 2.0)
+        self.assertEqual(second.json()["max_window_sec"], 30.0)
         self.assertEqual(second.json()["final"], False)
         self.assertEqual(asr.streaming_inference_calls, 1)
 
@@ -578,6 +594,15 @@ class OpenAIApiTests(unittest.TestCase):
 
         missing = client.post(f"/v1/realtime/transcriptions/sessions/{session_id}/finish")
         self.assertEqual(missing.status_code, 404)
+
+    def test_realtime_session_rejects_unbounded_audio_window(self):
+        response = _client().post(
+            "/v1/realtime/transcriptions/sessions",
+            json={"model": "qwen3-asr", "temperature": 0, "max_window_sec": 120},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("between 10 and 60", response.json()["error"]["message"])
 
     def test_ordinary_and_realtime_inference_share_one_engine_owner(self):
         from concurrent.futures import ThreadPoolExecutor

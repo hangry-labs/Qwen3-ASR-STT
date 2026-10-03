@@ -30,6 +30,20 @@ class _ASRProcessor:
         return "prompt:"
 
 
+class _CharacterTokenizer:
+    @staticmethod
+    def encode(text: str, **_kwargs) -> list[int]:
+        return [ord(character) for character in text]
+
+    @staticmethod
+    def decode(token_ids: list[int], **_kwargs) -> str:
+        return "".join(chr(token_id) for token_id in token_ids)
+
+
+class _CharacterASRProcessor(_ASRProcessor):
+    tokenizer = _CharacterTokenizer()
+
+
 class _ASRModel:
     device = torch.device("cpu")
     dtype = torch.float32
@@ -285,6 +299,41 @@ class NativeInferenceTests(unittest.TestCase):
         self.assertEqual(state.language, "English")
         self.assertEqual(state.text, "Hello")
         asr._generate_streaming_text.assert_called_once()
+
+    def test_streaming_caps_audio_window_and_stitches_stable_transcript(self):
+        asr = Qwen3ASRModel(model=_ASRModel(), processor=_CharacterASRProcessor())
+        asr._generate_streaming_text = Mock(
+            side_effect=[
+                "language English<asr_text>alpha beta",
+                "language English<asr_text>alpha beta gamma delta",
+                "delta epsilon zeta",
+                " zeta eta theta",
+            ]
+        )
+        state = asr.init_streaming_state(chunk_size_sec=2.0, max_window_sec=4.0)
+        two_seconds = np.zeros(32_000, dtype=np.float32)
+
+        asr.streaming_transcribe(two_seconds, state)
+        asr.streaming_transcribe(two_seconds, state)
+        asr.streaming_transcribe(two_seconds, state)
+        asr.streaming_transcribe(two_seconds, state)
+
+        self.assertEqual(state.audio_samples_seen, 128_000)
+        self.assertEqual(len(state.audio_accum), 64_000)
+        self.assertEqual(state.text, "alpha beta gamma delta epsilon zeta eta theta")
+        self.assertEqual(state.language, "English")
+        third_prompt, third_audio = asr._generate_streaming_text.call_args_list[2].args
+        self.assertEqual(third_prompt, "prompt:language English<asr_text>gamma ")
+        self.assertEqual(len(third_audio), 64_000)
+        fourth_prompt, fourth_audio = asr._generate_streaming_text.call_args_list[3].args
+        self.assertEqual(fourth_prompt, "prompt:language English<asr_text>epsilon")
+        self.assertEqual(len(fourth_audio), 64_000)
+
+    def test_streaming_window_must_not_be_shorter_than_chunk(self):
+        asr = Qwen3ASRModel(model=_ASRModel(), processor=_ASRProcessor())
+
+        with self.assertRaisesRegex(ValueError, "max_window_sec"):
+            asr.init_streaming_state(chunk_size_sec=2.0, max_window_sec=1.0)
 
     def test_native_aligner_broadcasts_text_and_language(self):
         processor = _AlignerProcessor()

@@ -202,7 +202,7 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .live-controls .device-field { min-width: 190px; margin-left: auto; }
 .record-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); }
 .settings-details { margin-top: 16px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
-.range-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 16px; }
+.range-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 22px; margin-top: 16px; }
 .range-grid label { display: grid; gap: 8px; }
 .range-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 0.75rem; }
 .setting-name { display: inline-flex; align-items: center; gap: 6px; }

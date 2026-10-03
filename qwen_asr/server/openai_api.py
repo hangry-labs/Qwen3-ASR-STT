@@ -18,7 +18,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_audios, normalize_language_name, validate_language
+from qwen_asr.inference.utils import (
+    SAMPLE_RATE,
+    SUPPORTED_LANGUAGES,
+    normalize_audios,
+    normalize_language_name,
+    validate_language,
+)
 from qwen_asr.server.aligner_runtime import (
     ALIGNER_MODEL_SUPPORTED_LANGUAGES,
     DEFAULT_SETTINGS_PATH,
@@ -398,12 +404,15 @@ class _RealtimeSession:
     language: str | None
     prompt: str
     chunk_size_sec: float
+    max_window_sec: float
     created_monotonic: float
     updated_monotonic: float
     status: str = "active"
 
 
 def _realtime_payload(session_id: str, state: Any, *, final: bool) -> dict[str, Any]:
+    audio_samples = int(getattr(state, "audio_samples_seen", 0)) + len(getattr(state, "buffer", []))
+    inference_samples = len(getattr(state, "audio_accum", []))
     return {
         "id": session_id,
         "object": "realtime.transcription",
@@ -411,6 +420,9 @@ def _realtime_payload(session_id: str, state: Any, *, final: bool) -> dict[str, 
         "text": getattr(state, "text", ""),
         "language": getattr(state, "language", ""),
         "chunk_id": int(getattr(state, "chunk_id", 0)),
+        "audio_seconds": round(audio_samples / SAMPLE_RATE, 3),
+        "inference_window_seconds": round(inference_samples / SAMPLE_RATE, 3),
+        "max_window_sec": float(getattr(state, "max_window_sec", 0)),
         "final": final,
     }
 
@@ -934,10 +946,16 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         realtime_defaults = runtime_settings.realtime_defaults()
-        chunk_size_sec = float(payload.get("chunk_size_sec", realtime_defaults["chunk_size_sec"]))
-        unfixed_chunk_num = int(payload.get("unfixed_chunk_num", realtime_defaults["unfixed_chunk_num"]))
-        unfixed_token_num = int(payload.get("unfixed_token_num", realtime_defaults["unfixed_token_num"]))
+        try:
+            chunk_size_sec = float(payload.get("chunk_size_sec", realtime_defaults["chunk_size_sec"]))
+            max_window_sec = float(payload.get("max_window_sec", realtime_defaults["max_window_sec"]))
+            unfixed_chunk_num = int(payload.get("unfixed_chunk_num", realtime_defaults["unfixed_chunk_num"]))
+            unfixed_token_num = int(payload.get("unfixed_token_num", realtime_defaults["unfixed_token_num"]))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Realtime settings must be numeric.") from exc
         prompt = str(payload.get("prompt") or "")
+        if not 10 <= max_window_sec <= 60:
+            raise HTTPException(status_code=400, detail="max_window_sec must be between 10 and 60 seconds.")
 
         if not hasattr(asr, "init_streaming_state"):
             raise HTTPException(status_code=501, detail="Realtime streaming is not available for this model")
@@ -949,6 +967,7 @@ def create_app(
                 unfixed_chunk_num=unfixed_chunk_num,
                 unfixed_token_num=unfixed_token_num,
                 chunk_size_sec=chunk_size_sec,
+                max_window_sec=max_window_sec,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -962,6 +981,7 @@ def create_app(
             language=forced_language,
             prompt=prompt,
             chunk_size_sec=chunk_size_sec,
+            max_window_sec=max_window_sec,
             created_monotonic=now,
             updated_monotonic=now,
         )
@@ -971,6 +991,7 @@ def create_app(
             "model": model_name,
             "language": forced_language,
             "chunk_size_sec": chunk_size_sec,
+            "max_window_sec": max_window_sec,
         }
 
     @app.post("/v1/realtime/transcriptions/sessions/{session_id}/audio")

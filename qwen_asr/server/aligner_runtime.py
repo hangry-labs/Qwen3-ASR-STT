@@ -19,6 +19,7 @@ LOAD_ALWAYS_KEY = "load_aligner_always"
 REALTIME_DEFAULTS_KEY = "realtime_defaults"
 DEFAULT_REALTIME_SETTINGS = {
     "chunk_size_sec": 2.0,
+    "max_window_sec": 30.0,
     "unfixed_chunk_num": 2,
     "unfixed_token_num": 5,
 }
@@ -95,10 +96,13 @@ class RuntimeSettingsStore:
             return dict(DEFAULT_REALTIME_SETTINGS)
         defaults = dict(DEFAULT_REALTIME_SETTINGS)
         chunk_size = values.get("chunk_size_sec")
+        max_window = values.get("max_window_sec")
         unfixed_chunks = values.get("unfixed_chunk_num")
         unfixed_tokens = values.get("unfixed_token_num")
         if isinstance(chunk_size, (int, float)) and not isinstance(chunk_size, bool) and 0.5 <= chunk_size <= 5:
             defaults["chunk_size_sec"] = float(chunk_size)
+        if isinstance(max_window, (int, float)) and not isinstance(max_window, bool) and 10 <= max_window <= 60:
+            defaults["max_window_sec"] = float(max_window)
         if isinstance(unfixed_chunks, int) and not isinstance(unfixed_chunks, bool) and 0 <= unfixed_chunks <= 6:
             defaults["unfixed_chunk_num"] = unfixed_chunks
         if isinstance(unfixed_tokens, int) and not isinstance(unfixed_tokens, bool) and 0 <= unfixed_tokens <= 20:
@@ -107,16 +111,22 @@ class RuntimeSettingsStore:
 
     def set_realtime_defaults(self, values: dict[str, Any]) -> dict[str, float | int]:
         chunk_size = values.get("chunk_size_sec")
+        max_window = values.get("max_window_sec")
         unfixed_chunks = values.get("unfixed_chunk_num")
         unfixed_tokens = values.get("unfixed_token_num")
         if not isinstance(chunk_size, (int, float)) or isinstance(chunk_size, bool) or not 0.5 <= chunk_size <= 5:
             raise ValueError("chunk_size_sec must be between 0.5 and 5 seconds.")
+        if not isinstance(max_window, (int, float)) or isinstance(max_window, bool) or not 10 <= max_window <= 60:
+            raise ValueError("max_window_sec must be between 10 and 60 seconds.")
+        if max_window < chunk_size:
+            raise ValueError("max_window_sec must be greater than or equal to chunk_size_sec.")
         if not isinstance(unfixed_chunks, int) or isinstance(unfixed_chunks, bool) or not 0 <= unfixed_chunks <= 6:
             raise ValueError("unfixed_chunk_num must be an integer between 0 and 6.")
         if not isinstance(unfixed_tokens, int) or isinstance(unfixed_tokens, bool) or not 0 <= unfixed_tokens <= 20:
             raise ValueError("unfixed_token_num must be an integer between 0 and 20.")
         normalized = {
             "chunk_size_sec": float(chunk_size),
+            "max_window_sec": float(max_window),
             "unfixed_chunk_num": unfixed_chunks,
             "unfixed_token_num": unfixed_tokens,
         }

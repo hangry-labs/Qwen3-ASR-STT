@@ -140,6 +140,10 @@
               <input id="chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2">
             </label>
             <label>
+              <span class="range-heading"><span class="setting-name">Audio window <span class="setting-help"><button type="button" aria-label="About audio window" aria-describedby="max-window-help">i</button><span class="setting-tooltip" id="max-window-help" role="tooltip">Maximum recent audio reprocessed by each update. Older stable text is retained separately, keeping long-session latency and model context bounded.</span></span></span><output data-output="max-window"></output></span>
+              <input id="max-window" data-setting type="range" min="10" max="60" step="5" value="30">
+            </label>
+            <label>
               <span class="range-heading"><span class="setting-name">Unfixed chunks <span class="setting-help"><button type="button" aria-label="About unfixed chunks" aria-describedby="unfixed-chunks-help">i</button><span class="setting-tooltip" id="unfixed-chunks-help" role="tooltip">Opening chunks decoded without using the previous transcript as a prefix. Higher values let early wording remain revisable for longer.</span></span></span><output data-output="unfixed-chunks"></output></span>
               <input id="unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2">
             </label>
@@ -191,6 +195,7 @@
           <p>Persistent starting values for new browser and API realtime sessions. Individual API requests can still override them.</p>
           <div class="range-grid">
             <label><span class="range-heading"><span>Chunk seconds</span><output data-output="system-chunk-size"></output></span><input id="system-chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2"></label>
+            <label><span class="range-heading"><span>Audio window</span><output data-output="system-max-window"></output></span><input id="system-max-window" data-setting type="range" min="10" max="60" step="5" value="30"></label>
             <label><span class="range-heading"><span>Unfixed chunks</span><output data-output="system-unfixed-chunks"></output></span><input id="system-unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2"></label>
             <label><span class="range-heading"><span>Unfixed tokens</span><output data-output="system-unfixed-tokens"></output></span><input id="system-unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5"></label>
           </div>

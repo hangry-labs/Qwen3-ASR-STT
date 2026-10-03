@@ -675,6 +675,7 @@ $('#realtime-toggle').addEventListener('click', async () => {
       language: $('#language').value,
       prompt: $('#prompt').value,
       chunkSize: Number($('#chunk-size').value),
+      maxWindow: Number($('#max-window').value),
       unfixedChunks: Number($('#unfixed-chunks').value),
       unfixedTokens: Number($('#unfixed-tokens').value),
     })
@@ -743,12 +744,14 @@ function applyRealtimeDefaults(defaults, { includeStream = true } = {}) {
   if (!defaults) return
   const values = {
     '#system-chunk-size': defaults.chunk_size_sec,
+    '#system-max-window': defaults.max_window_sec,
     '#system-unfixed-chunks': defaults.unfixed_chunk_num,
     '#system-unfixed-tokens': defaults.unfixed_token_num,
   }
   if (includeStream) {
     Object.assign(values, {
       '#chunk-size': defaults.chunk_size_sec,
+      '#max-window': defaults.max_window_sec,
       '#unfixed-chunks': defaults.unfixed_chunk_num,
       '#unfixed-tokens': defaults.unfixed_token_num,
     })
@@ -771,6 +774,7 @@ $('#realtime-defaults-save').addEventListener('click', async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chunk_size_sec: Number($('#system-chunk-size').value),
+        max_window_sec: Number($('#system-max-window').value),
         unfixed_chunk_num: Number($('#system-unfixed-chunks').value),
         unfixed_token_num: Number($('#system-unfixed-tokens').value),
       }),
