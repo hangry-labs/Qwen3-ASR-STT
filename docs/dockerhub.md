@@ -8,6 +8,8 @@ Easy-to-run local speech-to-text Docker images for Qwen3-ASR, with a browser UI 
 
 This Hangry Labs image is built for private local inference. Run the container, open the UI, upload or record audio, or point an OpenAI-compatible client at the local transcription endpoint.
 
+Official images are mirrored between [Docker Hub](https://hub.docker.com/r/hangrylabs/qwen3-asr-stt/tags) and [GitHub Container Registry](https://github.com/Hangry-Labs/Qwen3-ASR-STT/pkgs/container/qwen3-asr-stt). Replace `hangrylabs/qwen3-asr-stt` in any command with `ghcr.io/hangry-labs/qwen3-asr-stt` to use GHCR.
+
 ## What You Get
 
 - Browser UI for file upload, recording, realtime microphone transcription, API status, and GPU visibility
@@ -87,10 +89,12 @@ The tiny image downloads model assets on first online use, then reuses the mount
 
 ## Image Tags
 
+- Docker Hub: `hangrylabs/qwen3-asr-stt`
+- GitHub Container Registry: `ghcr.io/hangry-labs/qwen3-asr-stt`
 - `latest` - full baked image
 - `latest_tiny` - tiny image with persistent-cache workflow
-- `vX.Y.Z` - full release image, for example `v0.1.0`
-- `vX.Y.Z_tiny` - tiny release image, for example `v0.1.0_tiny`
+- `vX.Y` or `vX.Y.Z` - full release image, for example `v1.0`
+- `vX.Y_tiny` or `vX.Y.Z_tiny` - tiny release image, for example `v1.0_tiny`
 
 Snapshot tags are not published.
 

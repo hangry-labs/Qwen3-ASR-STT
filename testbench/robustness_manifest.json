@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "description": "Deterministic silence, synthetic noise, echo, and weak-speech regression matrix for Qwen3-ASR issue #165.",
+  "sources": {
+    "english_01": {
+      "audio": "assets/english/random/01.mp3",
+      "language": "English",
+      "expected_text": "I tried to make a cup of tea, but the kettle said, 'I'll put you on the list.' Very British, very serious."
+    },
+    "chinese_01": {
+      "audio": "assets/chinese/random/01.mp3",
+      "language": "Chinese",
+      "expected_text": "今天的奶茶很懂事，三分糖，却给了我十分的快乐。"
+    }
+  },
+  "fixtures": [
+    {
+      "id": "silence_1s",
+      "category": "silence",
+      "generator": {"kind": "silence", "duration_sec": 1},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "silence_5s",
+      "category": "silence",
+      "generator": {"kind": "silence", "duration_sec": 5},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "silence_15s",
+      "category": "silence",
+      "generator": {"kind": "silence", "duration_sec": 15},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "white_noise_low",
+      "category": "noise",
+      "generator": {"kind": "noise", "color": "white", "amplitude": 0.001, "duration_sec": 5, "seed": 165},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "white_noise_medium",
+      "category": "noise",
+      "generator": {"kind": "noise", "color": "white", "amplitude": 0.01, "duration_sec": 5, "seed": 165},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "white_noise_loud",
+      "category": "noise",
+      "generator": {"kind": "noise", "color": "white", "amplitude": 0.1, "duration_sec": 5, "seed": 165},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "pink_noise_medium",
+      "category": "noise",
+      "generator": {"kind": "noise", "color": "pink", "amplitude": 0.01, "duration_sec": 5, "seed": 165},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "brown_noise_medium",
+      "category": "noise",
+      "generator": {"kind": "noise", "color": "brown", "amplitude": 0.03, "duration_sec": 5, "seed": 165},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "voiceband_noise",
+      "category": "noise",
+      "generator": {"kind": "noise", "color": "white", "amplitude": 0.03, "duration_sec": 5, "seed": 165, "filter": "highpass=f=300,lowpass=f=3400"},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "mains_hum_60hz",
+      "category": "noise",
+      "generator": {"kind": "sine", "frequency": 60, "amplitude": 0.02, "duration_sec": 5},
+      "request_languages": [null, "Chinese", "English"],
+      "expected": "empty"
+    },
+    {
+      "id": "english_echo_moderate",
+      "category": "echo",
+      "generator": {"kind": "speech", "source": "english_01", "filter": "aecho=0.8:0.88:80|240|480:0.5|0.3|0.15"},
+      "request_languages": [null, "English"],
+      "expected": "source",
+      "minimum_score": 90
+    },
+    {
+      "id": "english_echo_severe",
+      "category": "echo",
+      "generator": {"kind": "speech", "source": "english_01", "filter": "aecho=0.8:0.9:180|360|720|1080:0.7|0.5|0.35|0.2"},
+      "request_languages": [null, "English"],
+      "expected": "source",
+      "minimum_score": 90
+    },
+    {
+      "id": "english_weak_20db",
+      "category": "weak_speech",
+      "generator": {"kind": "speech", "source": "english_01", "filter": "volume=0.1"},
+      "request_languages": [null, "English"],
+      "expected": "source",
+      "minimum_score": 90
+    },
+    {
+      "id": "english_weak_30db",
+      "category": "weak_speech",
+      "generator": {"kind": "speech", "source": "english_01", "filter": "volume=0.03"},
+      "request_languages": [null, "English"],
+      "expected": "source",
+      "minimum_score": 90
+    },
+    {
+      "id": "english_weak_40db",
+      "category": "weak_speech",
+      "generator": {"kind": "speech", "source": "english_01", "filter": "volume=0.01"},
+      "request_languages": [null, "English"],
+      "expected": "source",
+      "minimum_score": 90
+    },
+    {
+      "id": "chinese_weak_40db",
+      "category": "weak_speech",
+      "generator": {"kind": "speech", "source": "chinese_01", "filter": "volume=0.01"},
+      "request_languages": [null, "Chinese"],
+      "expected": "source",
+      "minimum_score": 90
+    },
+    {
+      "id": "english_weak_noisy",
+      "category": "weak_speech",
+      "generator": {"kind": "speech_noise", "source": "english_01", "speech_volume": 0.03, "noise_color": "white", "noise_amplitude": 0.02, "seed": 165},
+      "request_languages": [null, "English"],
+      "expected": "source",
+      "minimum_score": 90
+    }
+  ]
+}

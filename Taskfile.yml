@@ -102,7 +102,7 @@ tasks:
       - cmd /c git status --short
 
   release:
-    desc: Validate, tag, and push the current release, then prepare the next snapshot
+    desc: Release the current VERSION snapshot, tag and push it, then prepare the next snapshot
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun "{{.DRY_RUN}}" -NextVersion "{{.NEXT_VERSION}}" -SkipValidation "{{.SKIP_VALIDATION}}"
 
@@ -221,6 +221,12 @@ tasks:
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/wait_openai_health.ps1 -BaseUrl {{.QUALITY_BASE_URL}} -ExpectedModel "{{.QUALITY_MODEL_LABEL}}" -TimeoutSeconds {{.HEALTH_TIMEOUT_SECONDS}}
       - 'cmd /c python "testbench\run_openai_quality.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --limit {{.QUALITY_LIMIT}} --prewarm {{.QUALITY_PREWARM}} --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --language "{{.QUALITY_LANGUAGE}}" --gpu-index {{.GPU_DEVICE}} --comment "{{.BENCHMARK_COMMENT}}"'
+
+  benchmark-audio-robustness:
+    desc: Run deterministic silence, noise, echo, and weak-speech regressions against the active API
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/wait_openai_health.ps1 -BaseUrl {{.QUALITY_BASE_URL}} -ExpectedModel "{{.QUALITY_MODEL_LABEL}}" -TimeoutSeconds {{.HEALTH_TIMEOUT_SECONDS}}
+      - 'cmd /c python "testbench\run_audio_robustness.py" --base-url {{.QUALITY_BASE_URL}} --model {{.QUALITY_MODEL}} --model-label "{{.QUALITY_MODEL_LABEL}}" --request-timeout {{.QUALITY_REQUEST_TIMEOUT}} --gpu-index {{.GPU_DEVICE}} --comment "{{.BENCHMARK_COMMENT}}"'
 
   deploy-api-06b:
     desc: Start full UI/API service with Qwen3-ASR 0.6B and wait for health

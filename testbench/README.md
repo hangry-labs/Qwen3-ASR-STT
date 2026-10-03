@@ -69,3 +69,17 @@ benchmarks/transcription/
 Each result records the GPU name, memory, driver, and UUID discovered with `nvidia-smi`. Official Taskfile runs pass `GPU_DEVICE` to both the deployment and benchmark recorder so the reported hardware matches the GPU selected for inference.
 
 Performance results are measured end to end through the HTTP API and include total measured time, audio duration, mean/median/p95 request latency, real-time factor (RTF), and audio throughput as a multiple of realtime. Fixture duration probing happens before the timed benchmark window and requires `ffprobe`. Lower RTF and latency are better; higher realtime speed is better.
+
+## Audio robustness regression
+
+`robustness_manifest.json` defines a deterministic regression matrix for silence, synthetic white/pink/brown and voice-band noise, mains hum, echo, clean weak speech, and weak speech mixed with noise. The WAV fixtures are generated temporarily with `ffmpeg`, so binary derivatives are not stored in Git.
+
+Each non-speech fixture is tested with automatic language detection and with forced Chinese and English. Speech fixtures are tested in automatic and matching forced-language modes. This separation is intentional: it shows whether false positives are caused by the acoustic input itself or by forcing the decoder into a language.
+
+Run the matrix against the active API with:
+
+```text
+task benchmark-audio-robustness
+```
+
+The runner writes the machine-readable latest result to `testbench/results/robustness-latest.json` and the human-readable history and case details under `benchmarks/robustness/`. Use `--strict-exit` only when every case is expected to pass; the baseline intentionally preserves known model-native failures so later model or dependency upgrades can be compared without silently changing silence or weak-speech behavior.

@@ -10,6 +10,8 @@ Docker-first speech-to-text packaging for Qwen3-ASR with a local browser UI and 
 
 This Hangry Labs fork is built for local inference. The goal is simple: pull or build a container, run it with GPU support, open the UI or call the API, and transcribe speech without sending audio to a hosted service.
 
+Official images are published to both [Docker Hub](https://hub.docker.com/r/hangrylabs/qwen3-asr-stt/tags) and [GitHub Container Registry](https://github.com/Hangry-Labs/Qwen3-ASR-STT/pkgs/container/qwen3-asr-stt).
+
 ## What This Project Provides
 
 - Local browser UI for upload, recording, realtime microphone transcription, API status, and GPU visibility
@@ -34,6 +36,8 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
   -v qwen3_asr_stt_data:/app/persistent \
   hangrylabs/qwen3-asr-stt:latest
 ```
+
+The identical image is available from GitHub Container Registry as `ghcr.io/hangry-labs/qwen3-asr-stt:latest`. Replace the Docker Hub image name in any command with `ghcr.io/hangry-labs/qwen3-asr-stt` to use GHCR.
 
 Then open the browser UI:
 
@@ -73,10 +77,12 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 ## Image Tags
 
+- Docker Hub repository: `hangrylabs/qwen3-asr-stt`
+- GitHub Container Registry repository: `ghcr.io/hangry-labs/qwen3-asr-stt`
 - Full rolling image: `latest`
 - Tiny rolling image: `latest_tiny`
-- Full release image: `vX.Y.Z`, for example `v0.1.0`
-- Tiny release image: `vX.Y.Z_tiny`, for example `v0.1.0_tiny`
+- Full release image: `vX.Y` or `vX.Y.Z`, for example `v1.0`
+- Tiny release image: `vX.Y_tiny` or `vX.Y.Z_tiny`, for example `v1.0_tiny`
 
 Snapshot or development version tags are intentionally not published. Release tags are created only when the project is ready for a release.
 
@@ -358,7 +364,7 @@ task release DRY_RUN=1
 task release
 ```
 
-The release task validates package metadata, Python compilation, CodeQL results, and Dockerfile structure. It does not build or pull an image locally. It creates the release commit and annotated `vX.Y.Z` tag, prepares the next minor snapshot commit and README history section, then atomically pushes `main` and the release tag to `origin`. GitHub Actions remains solely responsible for publishing Docker images. Pass an explicit newer `NEXT_VERSION=X.Y.Z-snapshot` to override the default next-minor snapshot, or use `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing Docker Hub `latest` image separately before release when dependency-backed or runtime verification is required.
+The release task requires a snapshot `VERSION` such as `1.0-snapshot`, validates package metadata, Python compilation, CodeQL results, and Dockerfile structure, and converts it into the annotated `v1.0` release tag. It then prepares the next minor snapshot and README history section before atomically pushing `main` and the release tag to `origin`. GitHub Actions publishes identical full and tiny images to Docker Hub and GHCR. Pass an explicit newer `NEXT_VERSION=X.Y-snapshot` to override the default next-minor snapshot, or use `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing rolling image separately before release when dependency-backed or runtime verification is required.
 
 Stop containers:
 
@@ -373,6 +379,8 @@ Public benchmark notes live in:
 - `benchmarks/vram/model_vram.md`
 - `benchmarks/transcription/BENCHMARKS.md`
 - `benchmarks/transcription/DETAILS.md`
+- `benchmarks/robustness/BENCHMARKS.md`
+- `benchmarks/robustness/DETAILS.md`
 
 The transcription benchmark corpus uses 30 Qwen3-ASR-supported languages with 10 random examples per language. Official benchmark tasks run mandatory prewarm requests and discard prewarm timing before recording measured results.
 
@@ -387,7 +395,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ## Version History
 
-### v0.3.0 (in development)
+### v1.0 Snapshot
 
 - Added persistent and on-demand forced-aligner lifecycle management. Word or Segment selection can load the aligner without restarting, while the System tab can release its VRAM or keep it loaded across container replacements through the unified product data volume. Segment output is now divided into punctuation-, silence-, and duration-aware cues instead of one whole-file block.
 - Added Japanese word/segment alignment support to the image, capability-aware timestamp language validation, automatic idle aligner release, forced `verbose_json` timestamp output, actionable language-tokenizer errors, persistent realtime defaults, and one unified data volume for model assets, compiler caches, and application settings across releases.
@@ -400,29 +408,24 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Replaced quadratic forced-aligner timestamp repair with a stable O(N log N) implementation based on upstream PR [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215), preserving existing anchors and interpolation results.
 - Reproduced zero-duration lexical timestamps from [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) and added a model-score-aware constrained decoder fallback that preserves ordinary alignment output while resolving affected words into positive, monotonic spans.
 - Profiled the cumulative realtime path from [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199), reproduced 4.8× latency growth and a 74-second model-context failure, and replaced unbounded accumulation with a configurable stable rolling audio/transcript window. A 120-second regression now completes with a 30-second inference cap and stable post-window update latency.
+- Added a deterministic 44-case audio robustness benchmark for [QwenLM/Qwen3-ASR#165](https://github.com/QwenLM/Qwen3-ASR/issues/165), covering silence, synthetic noise, hum, echo, and weak speech in automatic and forced-language modes. The 0.6B baseline produced no false positives for 10 automatic-language non-speech cases but hallucinated text for 18 of 20 forced-language cases; clean speech remained accurate at 1% amplitude. The runtime intentionally preserves model-native silence handling instead of adding VAD or energy gating that could alter streaming, alignment, quiet-speech, or training-data workflows.
+- Reproduced the prompt/context leakage reported in [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186): forced-language decoding can copy context when audio is silent or weak, while real speech can anchor the same context as a useful vocabulary hint. This upstream model behavior remains unchanged rather than adding lossy prompt filtering or a separate hotword model.
+- Added GitHub Container Registry as an official image mirror. Full and tiny workflows now publish identical rolling and immutable tags to Docker Hub and GHCR from the same build.
 
-#### TODO
-
-- [x] Port and validate the stable O(N log N) forced-aligner timestamp repair from [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215).
-- [x] Reproduce and resolve zero-duration aligned words reported in [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) by selecting the highest-scoring valid boundary path instead of inventing timestamp offsets.
-- [x] Profile realtime latency growth and implement bounded stable-window audio/transcript processing for [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199).
-- [ ] Build a silence, noise, echo, and weak-speech regression set before deciding whether optional VAD should address [QwenLM/Qwen3-ASR#165](https://github.com/QwenLM/Qwen3-ASR/issues/165).
-- [ ] Measure prompt/context leakage from [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186) and improve UI guidance or limits before considering a separate hotword model.
-
-Development images use the rolling tags published from `main`:
+The current development snapshot is published through the rolling tags from `main`:
 
 **Standard image**
 
 ```bash
 docker volume create qwen3_asr_stt_data
-docker run --name qwen3-asr-stt-v0-3-0 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt-v1-0 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
 
 **Tiny image**
 
 ```bash
 docker volume create qwen3_asr_stt_data
-docker run --name qwen3-asr-stt-v0-3-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
+docker run --name qwen3-asr-stt-v1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
 ### v0.2.0

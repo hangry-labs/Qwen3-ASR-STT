@@ -27,12 +27,17 @@ function Convert-ToPackageVersion {
 
 function Get-NextMinorSnapshot {
     param([string]$Version)
-    if ($Version -notmatch '^(\d+)\.(\d+)\.\d+$') {
-        throw "Cannot infer the next snapshot from '$Version'. Pass NEXT_VERSION=..."
+    if ($Version -match '^(\d+)\.(\d+)$') {
+        $major = [int]$Matches[1]
+        $minor = [int]$Matches[2] + 1
+        return "$major.$minor-snapshot"
     }
-    $major = [int]$Matches[1]
-    $minor = [int]$Matches[2] + 1
-    return "$major.$minor.0-snapshot"
+    if ($Version -match '^(\d+)\.(\d+)\.\d+$') {
+        $major = [int]$Matches[1]
+        $minor = [int]$Matches[2] + 1
+        return "$major.$minor-snapshot"
+    }
+    throw "Cannot infer the next snapshot from '$Version'. Pass NEXT_VERSION=..."
 }
 
 function Get-VersionHistoryDockerSection {
@@ -44,7 +49,6 @@ function Get-VersionHistoryDockerSection {
     )
 
     $containerVersion = $Version.Replace(".", "-")
-    $volumeVersion = $Version.Replace(".", "_")
     $standardTag = if ($Rolling) { "latest" } else { "v$Version" }
     $tinyTag = if ($Rolling) { "latest_tiny" } else { "v${Version}_tiny" }
     return @(
@@ -53,14 +57,15 @@ function Get-VersionHistoryDockerSection {
         "**Standard image**",
         "",
         '```bash',
-        "docker run --name qwen3-asr-stt-v$containerVersion --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:$standardTag",
+        "docker volume create qwen3_asr_stt_data",
+        "docker run --name qwen3-asr-stt-v$containerVersion --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$standardTag",
         '```',
         "",
         "**Tiny image**",
         "",
         '```bash',
-        "docker volume create qwen3_asr_stt_v${volumeVersion}_hf_cache",
-        "docker run --name qwen3-asr-stt-v$containerVersion-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v${volumeVersion}_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:$tinyTag",
+        "docker volume create qwen3_asr_stt_data",
+        "docker run --name qwen3-asr-stt-v$containerVersion-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$tinyTag",
         '```'
     ) -join $LineEnding
 }
@@ -112,15 +117,15 @@ if (-not (Test-Path -LiteralPath "VERSION")) {
 }
 
 $currentVersion = (Get-Content -Raw -LiteralPath "VERSION").Trim()
-$versionMatch = [regex]::Match($currentVersion, '^(\d+\.\d+(?:\.\d+)?)(-snapshot)?$')
+$versionMatch = [regex]::Match($currentVersion, '^(\d+\.\d+(?:\.\d+)?)-snapshot$')
 if (-not $versionMatch.Success) {
-    throw "VERSION must look like 0.1.0 or 0.2.0-snapshot. Current: '$currentVersion'"
+    throw "VERSION must be a snapshot such as 1.0-snapshot or 1.0.0-snapshot before release. Current: '$currentVersion'"
 }
 
 $releaseVersion = Convert-ToPackageVersion $versionMatch.Groups[1].Value
-$isSnapshot = $versionMatch.Groups[2].Success
-$releaseTag = "v$releaseVersion"
-$expectedProjectVersion = if ($isSnapshot) { "$releaseVersion.dev0" } else { $releaseVersion }
+$releaseDisplayVersion = $versionMatch.Groups[1].Value
+$releaseTag = "v$releaseDisplayVersion"
+$expectedProjectVersion = "$releaseVersion.dev0"
 $projectVersion = Get-ProjectVersion
 
 if ($projectVersion -ne $expectedProjectVersion) {
@@ -135,7 +140,7 @@ if ([string]::IsNullOrWhiteSpace($NextVersion)) {
 
 $nextMatch = [regex]::Match($nextSnapshotVersion, '^(\d+\.\d+(?:\.\d+)?)-snapshot$')
 if (-not $nextMatch.Success) {
-    throw "NEXT_VERSION must look like 0.2.0-snapshot. Current: '$nextSnapshotVersion'"
+    throw "NEXT_VERSION must look like 1.1-snapshot or 1.1.0-snapshot. Current: '$nextSnapshotVersion'"
 }
 
 $nextReleaseVersion = Convert-ToPackageVersion $nextMatch.Groups[1].Value
@@ -143,24 +148,27 @@ if ([version]$nextReleaseVersion -le [version]$releaseVersion) {
     throw "NEXT_VERSION '$nextSnapshotVersion' must be newer than '$releaseVersion'."
 }
 $nextProjectVersion = "$nextReleaseVersion.dev0"
-$nextDevelopmentHeading = "### v$nextReleaseVersion (in development)"
+$nextDisplayVersion = $nextMatch.Groups[1].Value
+$nextDevelopmentHeading = "### v$nextDisplayVersion Snapshot"
 $nextDevelopmentHeadingPattern = '(?m)^' + [regex]::Escape($nextDevelopmentHeading) + '\r?$'
-$developmentImageNotice = "Development images use the rolling tags published from `main`:"
+$developmentImageNotice = 'The current development snapshot is published through the rolling tags from `main`:'
 $stableImageNotice = "Run this release with either image variant:"
 
 $readme = Get-Content -Raw -LiteralPath "README.md"
 $stableHeading = "### $releaseTag"
-$snapshotHeading = "### v$currentVersion"
+$snapshotHeading = "### v$releaseDisplayVersion Snapshot"
+$legacySnapshotHeading = "### v$currentVersion"
 $developmentHeading = "### v$releaseVersion (in development)"
 $stableHeadingPattern = '(?m)^' + [regex]::Escape($stableHeading) + '\r?$'
 $snapshotHeadingPattern = '(?m)^(' +
     [regex]::Escape($snapshotHeading) + '|' +
+    [regex]::Escape($legacySnapshotHeading) + '|' +
     [regex]::Escape($developmentHeading) + ')\r?$'
 if (
     -not [regex]::IsMatch($readme, $stableHeadingPattern) -and
     -not [regex]::IsMatch($readme, $snapshotHeadingPattern)
 ) {
-    throw "README.md must contain an exact '$stableHeading', '$snapshotHeading', or '$developmentHeading' release-history heading before release."
+    throw "README.md must contain an exact '$stableHeading' or '$snapshotHeading' release-history heading before release."
 }
 
 $branch = (git branch --show-current).Trim()
@@ -197,7 +205,7 @@ if (git tag --list $releaseTag) {
     throw "Tag $releaseTag already exists."
 }
 
-Write-Host "Release version: $releaseVersion"
+Write-Host "Release version: $releaseDisplayVersion"
 Write-Host "Release tag:     $releaseTag"
 Write-Host "Package version: $releaseVersion"
 Write-Host "Next snapshot:   $nextSnapshotVersion"
@@ -217,23 +225,24 @@ Invoke-Step "Run release validation" {
 }
 
 Invoke-Step "Update release metadata for $releaseTag" {
-    Set-Utf8Text "VERSION" "$releaseVersion`n"
+    Set-Utf8Text "VERSION" "$releaseDisplayVersion`n"
     Set-ProjectVersion $releaseVersion
 
     foreach ($doc in @("README.md", "docs/dockerhub.md")) {
         if (-not (Test-Path -LiteralPath $doc)) { continue }
         $content = Get-Content -Raw -LiteralPath $doc
-        $content = $content.Replace("### v$currentVersion", $stableHeading)
+        $content = $content.Replace($snapshotHeading, $stableHeading)
+        $content = $content.Replace($legacySnapshotHeading, $stableHeading)
         $content = $content.Replace($developmentHeading, $stableHeading)
         if ($doc -eq "README.md") {
             $lineEnding = if ($content.Contains("`r`n")) { "`r`n" } else { "`n" }
             $developmentDockerSection = Get-VersionHistoryDockerSection `
-                -Version $releaseVersion `
+                -Version $releaseDisplayVersion `
                 -AvailabilityLine $developmentImageNotice `
                 -LineEnding $lineEnding `
                 -Rolling $true
             $stableDockerSection = Get-VersionHistoryDockerSection `
-                -Version $releaseVersion `
+                -Version $releaseDisplayVersion `
                 -AvailabilityLine $stableImageNotice `
                 -LineEnding $lineEnding
             if (-not $content.Contains($developmentDockerSection)) {
@@ -241,7 +250,7 @@ Invoke-Step "Update release metadata for $releaseTag" {
             }
             $content = $content.Replace($developmentDockerSection, $stableDockerSection)
         }
-        $content = $content.Replace(":v$currentVersion", ":$releaseTag")
+        $content = $content.Replace(":v$releaseDisplayVersion", ":$releaseTag")
         Set-Utf8Text $doc $content
     }
 
@@ -284,7 +293,7 @@ Invoke-Step "Prepare $nextSnapshotVersion" {
         }
 
         $nextDockerSection = Get-VersionHistoryDockerSection `
-            -Version $nextReleaseVersion `
+            -Version $nextDisplayVersion `
             -AvailabilityLine $developmentImageNotice `
             -LineEnding $lineEnding `
             -Rolling $true
