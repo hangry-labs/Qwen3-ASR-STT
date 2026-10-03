@@ -57,19 +57,14 @@ class _Batch(dict):
 
 
 class _AlignerProcessor:
+    timestamp_segment_time = 80
+
     def __init__(self):
         self.prepared = None
 
     def prepare_forced_aligner_inputs(self, *, audio, transcript, language):
         self.prepared = (audio, transcript, language)
-        return _Batch(input_ids=torch.tensor([[1, 2], [1, 2]])), [["one"], ["two"]]
-
-    @staticmethod
-    def decode_forced_alignment(**_kwargs):
-        return [
-            [{"text": "one", "start_time": 0.1, "end_time": 0.2}],
-            [SimpleNamespace(text="two", start_time=0.3, end_time=0.4)],
-        ]
+        return _Batch(input_ids=torch.tensor([[42, 42], [42, 42]])), [["one"], ["two"]]
 
 
 class _AlignerModel:
@@ -83,7 +78,12 @@ class _AlignerModel:
 
     @staticmethod
     def __call__(**_inputs):
-        return SimpleNamespace(logits=torch.zeros((2, 2, 1)))
+        logits = torch.full((2, 2, 5), -1.0)
+        logits[0, 0, 1] = 1.0
+        logits[0, 1, 2] = 1.0
+        logits[1, 0, 3] = 1.0
+        logits[1, 1, 4] = 1.0
+        return SimpleNamespace(logits=logits)
 
 
 class NativeInferenceTests(unittest.TestCase):
@@ -299,7 +299,8 @@ class NativeInferenceTests(unittest.TestCase):
         self.assertEqual(processor.prepared[1], ["sample", "sample"])
         self.assertEqual(processor.prepared[2], ["English", "English"])
         self.assertEqual(results[0][0].text, "one")
-        self.assertEqual(results[1][0].start_time, 0.3)
+        self.assertEqual(results[0][0].start_time, 0.08)
+        self.assertEqual(results[1][0].start_time, 0.24)
 
 
 if __name__ == "__main__":

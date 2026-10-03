@@ -1,6 +1,7 @@
 # coding=utf-8
 # Copyright 2026 The Alibaba Qwen team.
 # SPDX-License-Identifier: Apache-2.0
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
@@ -11,6 +12,85 @@ from transformers.models.qwen3_asr.processing_qwen3_asr import Qwen3ASRProcessor
 
 from .compile_utils import compile_model_forward
 from .utils import AudioLike, ensure_list, normalize_audios
+
+
+def _repair_timestamps(values: Any) -> List[int]:
+    """Repair timestamp bins while preserving the legacy stable anchors."""
+    data = values.tolist() if hasattr(values, "tolist") else list(values)
+    count = len(data)
+    if count == 0:
+        # Preserve the exception raised by the previous max(dp) implementation.
+        raise ValueError("max() arg is an empty sequence")
+
+    # Stable O(n log n) LNDS construction from Qwen3-ASR PR #215, based on
+    # vLLM-Omni PR #8230. The level lists retain the legacy implementation's
+    # first endpoint and first valid predecessor tie-breaking behavior.
+    tails: List[Any] = []
+    levels: List[List[int]] = []
+    for index, value in enumerate(data):
+        length = bisect_right(tails, value)
+        if length == len(tails):
+            tails.append(value)
+            levels.append([])
+        else:
+            tails[length] = value
+        levels[length].append(index)
+
+    is_normal = [False] * count
+    index = levels[-1][0]
+    is_normal[index] = True
+    for depth in range(len(levels) - 2, -1, -1):
+        for predecessor in levels[depth]:
+            if data[predecessor] <= data[index]:
+                index = predecessor
+                is_normal[index] = True
+                break
+
+    result = data.copy()
+    block_start = 0
+    while block_start < count:
+        if is_normal[block_start]:
+            block_start += 1
+            continue
+
+        block_end = block_start
+        while block_end < count and not is_normal[block_end]:
+            block_end += 1
+        anomaly_count = block_end - block_start
+
+        left_value = next(
+            (result[pos] for pos in range(block_start - 1, -1, -1) if is_normal[pos]),
+            None,
+        )
+        right_value = next(
+            (result[pos] for pos in range(block_end, count) if is_normal[pos]),
+            None,
+        )
+
+        if anomaly_count <= 2:
+            for pos in range(block_start, block_end):
+                if left_value is None:
+                    result[pos] = right_value
+                elif right_value is None:
+                    result[pos] = left_value
+                else:
+                    distance_left = pos - (block_start - 1)
+                    distance_right = block_end - pos
+                    result[pos] = left_value if distance_left <= distance_right else right_value
+        elif left_value is not None and right_value is not None:
+            step = (right_value - left_value) / (anomaly_count + 1)
+            for pos in range(block_start, block_end):
+                result[pos] = left_value + step * (pos - block_start + 1)
+        elif left_value is not None:
+            for pos in range(block_start, block_end):
+                result[pos] = left_value
+        elif right_value is not None:
+            for pos in range(block_start, block_end):
+                result[pos] = right_value
+
+        block_start = block_end
+
+    return [int(value) for value in result]
 
 
 @dataclass(frozen=True)
@@ -140,6 +220,36 @@ class Qwen3ForcedAligner:
             )
         return ForcedAlignResult(items=items)
 
+    def _decode_forced_alignment(
+        self,
+        *,
+        logits: torch.Tensor,
+        input_ids: torch.Tensor,
+        word_lists: List[List[str]],
+    ) -> List[List[dict[str, Any]]]:
+        """Decode aligner logits using the stable subquadratic repair path."""
+        timestamp_segment_time = float(self.processor.timestamp_segment_time)
+        predicted_ids = logits.argmax(dim=-1)
+        decoded: List[List[dict[str, Any]]] = []
+
+        for sample_index, words in enumerate(word_lists):
+            timestamp_mask = input_ids[sample_index] == self.timestamp_token_id
+            timestamp_predictions = predicted_ids[sample_index][timestamp_mask]
+            raw_milliseconds = (timestamp_predictions.float() * timestamp_segment_time).cpu().numpy()
+            fixed_milliseconds = _repair_timestamps(raw_milliseconds)
+            decoded.append(
+                [
+                    {
+                        "text": word,
+                        "start_time": round(fixed_milliseconds[word_index * 2] / 1000.0, 3),
+                        "end_time": round(fixed_milliseconds[word_index * 2 + 1] / 1000.0, 3),
+                    }
+                    for word_index, word in enumerate(words)
+                ]
+            )
+
+        return decoded
+
     @torch.inference_mode()
     def align(
         self,
@@ -168,11 +278,10 @@ class Qwen3ForcedAligner:
         )
         inputs = inputs.to(self.model.device).to(self.model.dtype)
         outputs = self.model(**inputs)
-        decoded = self.processor.decode_forced_alignment(
+        decoded = self._decode_forced_alignment(
             logits=outputs.logits,
             input_ids=inputs["input_ids"],
             word_lists=word_lists,
-            timestamp_token_id=self.timestamp_token_id,
         )
         return [self._to_structured_items(items) for items in decoded]
 
