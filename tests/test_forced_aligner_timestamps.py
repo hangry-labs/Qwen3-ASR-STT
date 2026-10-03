@@ -2,7 +2,9 @@ import itertools
 import random
 import unittest
 
-from qwen_asr.inference.qwen3_forced_aligner import _repair_timestamps
+import torch
+
+from qwen_asr.inference.qwen3_forced_aligner import _decode_timestamp_bins, _repair_timestamps
 
 
 def _legacy_repair(values: list[int]) -> list[int]:
@@ -78,6 +80,14 @@ def _legacy_repair(values: list[int]) -> list[int]:
     return [int(value) for value in result]
 
 
+def _logits(*rows: dict[int, float], bin_count: int = 5) -> torch.Tensor:
+    logits = torch.full((len(rows), bin_count), -100.0)
+    for position, scores in enumerate(rows):
+        for timestamp_bin, score in scores.items():
+            logits[position, timestamp_bin] = score
+    return logits
+
+
 class TimestampRepairTests(unittest.TestCase):
     def test_regression_cases_preserve_stable_anchors_and_interpolation(self):
         cases = [
@@ -110,6 +120,47 @@ class TimestampRepairTests(unittest.TestCase):
         for _ in range(2_000):
             sample = [randomizer.randrange(5_000) for _ in range(randomizer.randrange(1, 513))]
             self.assertEqual(_repair_timestamps(sample), _legacy_repair(sample))
+
+
+class TimestampDecodeTests(unittest.TestCase):
+    def test_preserves_legacy_decode_when_every_word_has_duration(self):
+        logits = _logits(
+            {0: 10.0},
+            {2: 10.0},
+            {2: 10.0},
+            {4: 10.0},
+        )
+
+        self.assertEqual(_decode_timestamp_bins(logits), [0, 2, 2, 4])
+
+    def test_uses_best_constrained_path_for_zero_duration_word(self):
+        logits = _logits(
+            {0: 10.0},
+            {1: 10.0},
+            {1: 10.0},
+            {1: 10.0, 2: 9.0},
+            {1: 10.0, 2: 9.0},
+            {3: 10.0},
+        )
+
+        self.assertEqual(_decode_timestamp_bins(logits), [0, 1, 1, 2, 2, 3])
+
+    def test_can_move_start_earlier_when_better_supported_than_later_end(self):
+        logits = _logits(
+            {1: 9.0, 2: 10.0},
+            {2: 10.0, 3: 1.0},
+        )
+
+        self.assertEqual(_decode_timestamp_bins(logits), [1, 2])
+
+    def test_falls_back_when_checkpoint_has_only_one_timestamp_bin(self):
+        self.assertEqual(_decode_timestamp_bins(torch.tensor([[1.0], [1.0]])), [0, 0])
+
+    def test_rejects_unpaired_or_malformed_timestamp_logits(self):
+        with self.assertRaisesRegex(ValueError, "shape"):
+            _decode_timestamp_bins(torch.zeros(2))
+        with self.assertRaisesRegex(ValueError, "paired"):
+            _decode_timestamp_bins(torch.zeros((3, 4)))
 
 
 if __name__ == "__main__":

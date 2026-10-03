@@ -93,6 +93,77 @@ def _repair_timestamps(values: Any) -> List[int]:
     return [int(value) for value in result]
 
 
+def _decode_timestamp_bins(timestamp_logits: torch.Tensor) -> List[int]:
+    """Decode monotonic timestamp bins, resolving zero-duration words by score."""
+    if timestamp_logits.ndim != 2:
+        raise ValueError("timestamp_logits must have shape [timestamp_tokens, timestamp_bins]")
+
+    timestamp_count, bin_count = timestamp_logits.shape
+    if timestamp_count % 2:
+        raise ValueError("timestamp_logits must contain paired start and end tokens")
+
+    raw_bins = timestamp_logits.argmax(dim=-1).detach().cpu().tolist()
+    repaired_bins = _repair_timestamps(raw_bins)
+    if all(
+        repaired_bins[position] < repaired_bins[position + 1]
+        for position in range(0, timestamp_count, 2)
+    ):
+        return repaired_bins
+
+    # The checkpoint predicts each boundary independently, so a short word can
+    # receive the same highest-scoring 80 ms bin for both start and end. Only in
+    # that case, find the maximum-score path whose boundaries remain monotonic
+    # and whose word ends are at least one bin after their starts. This uses the
+    # model's alternative scores rather than inventing a fixed offset.
+    if bin_count < 2:
+        return repaired_bins
+
+    scores = timestamp_logits.float()
+    previous_scores = scores[0]
+    backpointers: List[torch.Tensor] = []
+    negative_infinity = torch.full(
+        (1,),
+        float("-inf"),
+        dtype=scores.dtype,
+        device=scores.device,
+    )
+
+    for position in range(1, timestamp_count):
+        prefix_scores, prefix_indices = torch.cummax(previous_scores, dim=0)
+        if position % 2:
+            # End tokens must follow their paired start by at least one bin.
+            best_scores = torch.cat((negative_infinity, prefix_scores[:-1]))
+            best_indices = torch.cat(
+                (
+                    torch.zeros(1, dtype=prefix_indices.dtype, device=scores.device),
+                    prefix_indices[:-1],
+                )
+            )
+        else:
+            # A word may start where the preceding word ends.
+            best_scores = prefix_scores
+            best_indices = prefix_indices
+        previous_scores = scores[position] + best_scores
+        backpointers.append(best_indices)
+
+    if not torch.isfinite(previous_scores).any():
+        return repaired_bins
+
+    cursor = int(previous_scores.argmax().item())
+    constrained_bins = [cursor]
+    for pointers in reversed(backpointers):
+        cursor = int(pointers[cursor].item())
+        constrained_bins.append(cursor)
+    constrained_bins.reverse()
+
+    if any(
+        constrained_bins[position] >= constrained_bins[position + 1]
+        for position in range(0, timestamp_count, 2)
+    ):
+        return repaired_bins
+    return constrained_bins
+
+
 @dataclass(frozen=True)
 class ForcedAlignItem:
     text: str
@@ -229,14 +300,13 @@ class Qwen3ForcedAligner:
     ) -> List[List[dict[str, Any]]]:
         """Decode aligner logits using the stable subquadratic repair path."""
         timestamp_segment_time = float(self.processor.timestamp_segment_time)
-        predicted_ids = logits.argmax(dim=-1)
         decoded: List[List[dict[str, Any]]] = []
 
         for sample_index, words in enumerate(word_lists):
             timestamp_mask = input_ids[sample_index] == self.timestamp_token_id
-            timestamp_predictions = predicted_ids[sample_index][timestamp_mask]
-            raw_milliseconds = (timestamp_predictions.float() * timestamp_segment_time).cpu().numpy()
-            fixed_milliseconds = _repair_timestamps(raw_milliseconds)
+            timestamp_logits = logits[sample_index][timestamp_mask]
+            timestamp_bins = _decode_timestamp_bins(timestamp_logits)
+            fixed_milliseconds = [value * timestamp_segment_time for value in timestamp_bins]
             decoded.append(
                 [
                     {

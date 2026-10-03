@@ -397,11 +397,12 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Reorganized runtime composition into a dedicated product application layer, limited the browser and API modules to their own responsibilities, colocated GPU telemetry with the UI, removed the obsolete API-only launcher and direct-library input/export compatibility paths, and pruned seven unused packages from the locked Docker dependency set.
 - Polished forced-alignment workflows with timestamp choice restoration during ordinary page refreshes, automatic removal of incompatible examples, live load-completion feedback, tokenizer preloading, and dynamic-shape compilation to avoid first-use recompilation when audio or alignment language changes.
 - Replaced quadratic forced-aligner timestamp repair with a stable O(N log N) implementation based on upstream PR [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215), preserving existing anchors and interpolation results.
+- Reproduced zero-duration lexical timestamps from [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) and added a model-score-aware constrained decoder fallback that preserves ordinary alignment output while resolving affected words into positive, monotonic spans.
 
 #### TODO
 
 - [x] Port and validate the stable O(N log N) forced-aligner timestamp repair from [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215).
-- [ ] Reproduce and define a safe consumer policy for zero-duration aligned words reported in [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197), without inventing misleading timestamp precision.
+- [x] Reproduce and resolve zero-duration aligned words reported in [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) by selecting the highest-scoring valid boundary path instead of inventing timestamp offsets.
 - [ ] Profile realtime latency growth and investigate bounded or stable-window audio processing for [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199).
 - [ ] Build a silence, noise, echo, and weak-speech regression set before deciding whether optional VAD should address [QwenLM/Qwen3-ASR#165](https://github.com/QwenLM/Qwen3-ASR/issues/165).
 - [ ] Measure prompt/context leakage from [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186) and improve UI guidance or limits before considering a separate hotword model.
