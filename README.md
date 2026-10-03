@@ -109,7 +109,22 @@ Remote file upload and API calls work over normal LAN HTTP when the port is expo
 
 ## OpenAI-Compatible API
 
-The main integration target is the local OpenAI-compatible transcription API.
+The stable integration target is `POST /v1/audio/transcriptions`. It is exercised with the current OpenAI Python client and can be used by applications that allow a custom OpenAI base URL, including local assistants and automation tools. Interactive OpenAPI documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+Supported request fields:
+
+| Field | Support |
+| --- | --- |
+| `file` | Required. Tested with `aac`, `flac`, `mp3`, `mp4`, `mpeg`, `mpga`, `m4a`, `ogg`, `wav`, and `webm`; other formats are passed to the bundled decoder. 100 MB by default. |
+| `model` | Optional. Use `qwen3-asr`, `qwen3-asr-stt`, or the active Hugging Face model ID; when omitted, the single loaded model is selected automatically. |
+| `language` | Optional ISO code or language name. Omit it for model-native automatic language identification. |
+| `prompt` | Optional transcription context for vocabulary and style. |
+| `response_format` | `json`, `text`, `verbose_json`, `srt`, or `vtt`. |
+| `timestamp_granularities` | `word`, `segment`, or both. Requires `verbose_json` and loads the forced aligner on demand. |
+| `temperature` | Optional, but only `0` is accepted. Both inference backends intentionally use deterministic greedy decoding for stable STT output. |
+| `stream` | Optional. Returns OpenAI-compatible SSE event shapes after completed-file inference; see the realtime distinction below. |
+
+`verbose_json` always includes the detected language, normalized audio duration, and segments. Without requested alignment, it reports one coarse segment covering the completed audio. With `word` or `segment` timestamps, it returns exact forced-aligner timing. `srt` and `vtt` automatically request real segment alignment and therefore follow the same aligner language availability rules; they never manufacture placeholder subtitle timings.
 
 ### cURL
 
@@ -128,6 +143,17 @@ curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
   -F "model=qwen3-asr" \
   -F "language=English" \
   -F "response_format=verbose_json"
+```
+
+Request exact word and segment timestamps:
+
+```bash
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
+  -F "file=@sample.mp3" \
+  -F "model=qwen3-asr" \
+  -F "response_format=verbose_json" \
+  -F "timestamp_granularities[]=word" \
+  -F "timestamp_granularities[]=segment"
 ```
 
 Text response:
@@ -158,24 +184,44 @@ with open("sample.mp3", "rb") as audio:
 print(result.text)
 ```
 
+The `api_key="local"` value satisfies the client constructor; this local server does not validate it. There is no built-in authentication. Treat the service as a trusted local/private-network application, or place an authenticating reverse proxy in front of it. To restrict Docker publishing to the host itself, use `-p 127.0.0.1:8000:8000` instead of `-p 8000:8000`.
+
+### File streaming and realtime streaming
+
+These are separate interfaces:
+
+- `stream=true` on `/v1/audio/transcriptions` preserves OpenAI client compatibility for completed files. The server finishes Qwen inference and then sends `transcript.text.delta` and `transcript.text.done` SSE events. It does not reduce time-to-first-text because the underlying file decode returns a completed transcript.
+- The browser Stream tab uses the Hangry Labs realtime session API. Audio is submitted progressively, inference runs repeatedly over a bounded recent-audio window, and updated text appears while recording continues. This is real progressive streaming, but its HTTP session protocol is a custom extension rather than the OpenAI Realtime WebSocket protocol.
+
 ### Supported Routes
 
-- `GET /health` (readiness-compatible alias)
-- `GET /health/live`
-- `GET /health/ready`
-- `GET /metrics/inference`
-- `GET /system/aligner`
-- `PUT /system/aligner`
-- `POST /system/aligner/load`
-- `POST /system/aligner/unload`
+OpenAI-compatible routes:
+
 - `GET /v1/models`
 - `GET /v1/models/{model}`
 - `POST /v1/audio/transcriptions`
+
+Hangry Labs discovery and realtime extensions:
+
 - `GET /v1/audio/supported_languages`
 - `POST /v1/realtime/transcriptions/sessions`
 - `POST /v1/realtime/transcriptions/sessions/{session_id}/audio`
 - `POST /v1/realtime/transcriptions/sessions/{session_id}/finish`
 - `DELETE /v1/realtime/transcriptions/sessions/{session_id}`
+
+Operations and system routes:
+
+- `GET /health` (readiness-compatible alias)
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /metrics/inference`
+- `GET /system/gpu`
+- `GET /system/aligner`
+- `PUT /system/aligner`
+- `POST /system/aligner/load`
+- `POST /system/aligner/unload`
+- `GET /system/settings`
+- `PUT /system/settings/realtime`
 
 `/v1/audio/translations` exists as an explicit not-implemented response until Qwen3-ASR translation behavior has a dedicated compatibility pass.
 
@@ -223,6 +269,7 @@ Common environment variables:
 | `QWEN_ASR_CONCURRENCY` | `2` | Maximum admitted inference requests (one active engine call plus queue) |
 | `QWEN_ASR_MAX_INFERENCE_BATCH_SIZE` | `2` | ASR inference batch cap |
 | `QWEN_ASR_MAX_NEW_TOKENS` | `512` | Max generated tokens |
+| `QWEN_ASR_MAX_UPLOAD_MB` | `100` | Maximum file or realtime-chunk upload size |
 | `QWEN_ASR_GPU_MEMORY_UTILIZATION` | `0.25` | vLLM GPU-memory reservation fraction |
 | `QWEN_ASR_MAX_MODEL_LEN` | `2048` | vLLM maximum model context |
 | `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM scheduler token budget |
@@ -397,6 +444,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ### v1.0 Snapshot
 
+- Hardened the public API contract for OpenAI-client integrations while retaining its convenient permissive behavior: documented multipart and realtime schemas in `/docs`, made the single loaded model optional to specify, added model registration timestamps, completed unaligned `verbose_json` metadata, made SRT/VTT use real forced alignment, enforced timestamp-format rules, added tested AAC support and a configurable 100 MB upload limit, normalized unexpected failures, grouped custom and compatible routes, and added a live OpenAI Python client contract regression.
 - Added persistent and on-demand forced-aligner lifecycle management. Word or Segment selection can load the aligner without restarting, while the System tab can release its VRAM or keep it loaded across container replacements through the unified product data volume. Segment output is now divided into punctuation-, silence-, and duration-aware cues instead of one whole-file block.
 - Added Japanese word/segment alignment support to the image, capability-aware timestamp language validation, automatic idle aligner release, forced `verbose_json` timestamp output, actionable language-tokenizer errors, persistent realtime defaults, and one unified data volume for model assets, compiler caches, and application settings across releases.
 - Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Consolidated artwork under `assets/`, converted shipped web artwork to WebP, and reduced the vendored Lucide font to the glyphs used by the workspace.

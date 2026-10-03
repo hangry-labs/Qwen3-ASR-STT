@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import tempfile
@@ -33,6 +34,21 @@ from qwen_asr.server.aligner_runtime import (
     RuntimeSettingsStore,
     aligner_language_capabilities,
 )
+from qwen_asr.server.api_contracts import (
+    ERROR_RESPONSES,
+    REALTIME_AUDIO_OPENAPI_EXTRA,
+    TRANSCRIPTION_OPENAPI_EXTRA,
+    TRANSCRIPTION_RESPONSES,
+    AlignerSettingsUpdate,
+    ModelListResponse,
+    ModelObject,
+    RealtimeSessionCreateRequest,
+    RealtimeSessionDeleteResponse,
+    RealtimeSessionResponse,
+    RealtimeSettingsUpdate,
+    RealtimeTranscriptionEvent,
+    SupportedLanguagesResponse,
+)
 from qwen_asr.server.contracts import ASRRuntime
 from qwen_asr.server.inference_runtime import (
     DEFAULT_INFERENCE_TIMEOUT_SECONDS,
@@ -47,6 +63,20 @@ from qwen_asr.startup_logging import optional_timer
 MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
 RESPONSE_FORMATS = {"json", "text", "verbose_json", "srt", "vtt"}
 TIMESTAMP_GRANULARITIES = {"segment", "word"}
+SUPPORTED_AUDIO_CONTENT_TYPES = {
+    "audio/aac": ".aac",
+    "audio/flac": ".flac",
+    "audio/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/webm": ".webm",
+    "audio/x-aac": ".aac",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+}
+DEFAULT_MAX_UPLOAD_MB = 100.0
 SEGMENT_SILENCE_GAP_SECONDS = 0.75
 SEGMENT_MAX_SECONDS = 12.0
 SEGMENT_TERMINATORS = (".", "!", "?", "。", "！", "？")
@@ -115,6 +145,8 @@ LANGUAGE_ALIASES = {
     "macedonian": "Macedonian",
 }
 
+logger = logging.getLogger(__name__)
+
 
 def _openai_error_response(
     *,
@@ -177,6 +209,38 @@ def _form_list(form: Any, name: str) -> list[str]:
     return out
 
 
+def _upload_suffix(upload: UploadFile | StarletteUploadFile) -> str:
+    suffix = Path(upload.filename or "").suffix.lower()
+    if re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+        return suffix
+    content_type = str(upload.content_type or "").split(";", 1)[0].strip().lower()
+    inferred = SUPPORTED_AUDIO_CONTENT_TYPES.get(content_type)
+    if inferred:
+        return inferred
+    return ".audio"
+
+
+async def _read_upload(
+    upload: UploadFile | StarletteUploadFile,
+    *,
+    max_upload_bytes: int,
+    allow_empty: bool = False,
+) -> bytes:
+    try:
+        payload = await upload.read(max_upload_bytes + 1)
+    finally:
+        await upload.close()
+    if len(payload) > max_upload_bytes:
+        limit_mb = max_upload_bytes / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Uploaded audio exceeds the configured {limit_mb:g} MB limit.",
+        )
+    if not payload and not allow_empty:
+        raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
+    return payload
+
+
 def _normalize_openai_language(language: str) -> str:
     value = (language or "").strip()
     if not value:
@@ -201,7 +265,9 @@ def _validate_temperature(value: str) -> None:
 
 
 def _validate_model(model: str, model_name: str) -> None:
-    if model and model not in {model_name, *MODEL_ALIASES}:
+    if not model.strip():
+        return
+    if model not in {model_name, *MODEL_ALIASES}:
         raise HTTPException(status_code=400, detail=f"Unsupported model: {model}")
 
 
@@ -328,10 +394,34 @@ def _segments_payload(item: Any) -> list[dict[str, Any]]:
 
 
 def _duration(item: Any) -> float | None:
+    duration = getattr(item, "duration", None)
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+        return max(0.0, float(duration))
     words = _words_payload(item)
     if words:
         return words[-1]["end"]
     return None
+
+
+def _coarse_segments_payload(item: Any) -> list[dict[str, Any]]:
+    text = str(getattr(item, "text", "") or "")
+    duration = _duration(item)
+    if not text or duration is None:
+        return []
+    return [
+        {
+            "id": 0,
+            "seek": 0,
+            "start": 0.0,
+            "end": duration,
+            "text": text,
+            "tokens": [],
+            "temperature": 0.0,
+            "avg_logprob": None,
+            "compression_ratio": None,
+            "no_speech_prob": None,
+        }
+    ]
 
 
 def _timestamp(seconds: float, *, decimal: str) -> str:
@@ -344,7 +434,7 @@ def _timestamp(seconds: float, *, decimal: str) -> str:
 
 
 def _srt_response(item: Any) -> PlainTextResponse:
-    segments = _segments_payload(item) or [{"start": 0.0, "end": _duration(item) or 0.001, "text": item.text}]
+    segments = _segments_payload(item)
     body = "\n".join(
         f"{index}\n{_timestamp(segment['start'], decimal=',')} --> {_timestamp(segment['end'], decimal=',')}\n{segment['text']}\n"
         for index, segment in enumerate(segments, start=1)
@@ -353,7 +443,7 @@ def _srt_response(item: Any) -> PlainTextResponse:
 
 
 def _vtt_response(item: Any) -> PlainTextResponse:
-    segments = _segments_payload(item) or [{"start": 0.0, "end": _duration(item) or 0.001, "text": item.text}]
+    segments = _segments_payload(item)
     cues = "\n".join(
         f"{_timestamp(segment['start'], decimal='.')} --> {_timestamp(segment['end'], decimal='.')}\n{segment['text']}\n"
         for segment in segments
@@ -370,11 +460,13 @@ def _json_response(item: Any, *, response_format: str, timestamp_granularities: 
     if response_format == "vtt":
         return _vtt_response(item)
     if response_format == "verbose_json":
+        segments = _segments_payload(item) if "segment" in timestamp_granularities else _coarse_segments_payload(item)
         payload: dict[str, Any] = {
+            "task": "transcribe",
             "text": item.text,
             "language": item.language,
-            "duration": _duration(item),
-            "segments": _segments_payload(item) if "segment" in timestamp_granularities else [],
+            "duration": _duration(item) or 0.0,
+            "segments": segments,
         }
         if "word" in timestamp_granularities:
             payload["words"] = _words_payload(item)
@@ -461,8 +553,17 @@ def create_app(
     enable_watchdog: bool | None = None,
     startup_warmup: Callable[[], Any] | None = None,
     aligner_runtime: AlignerRuntime | None = None,
+    max_upload_bytes: int | None = None,
 ) -> FastAPI:
     realtime_sessions: dict[str, _RealtimeSession] = {}
+    model_registered_at = int(time.time())
+    upload_limit = int(
+        max_upload_bytes
+        if max_upload_bytes is not None
+        else float(os.getenv("QWEN_ASR_MAX_UPLOAD_MB", str(DEFAULT_MAX_UPLOAD_MB))) * 1024 * 1024
+    )
+    if upload_limit <= 0:
+        raise ValueError("The configured upload limit must be greater than zero.")
     inference_timeout = float(
         inference_timeout_seconds
         if inference_timeout_seconds is not None
@@ -617,7 +718,31 @@ def create_app(
                     pass
             coordinator.shutdown()
 
-    app = FastAPI(title="Qwen3-ASR OpenAI-compatible API", lifespan=lifespan)
+    app = FastAPI(
+        title="Qwen3-ASR STT API",
+        description=(
+            "OpenAI-compatible file transcription plus Hangry Labs realtime, system, and operations APIs. "
+            "This local-first service does not require authentication; do not expose it to an untrusted network."
+        ),
+        version="1.0",
+        openapi_tags=[
+            {
+                "name": "OpenAI compatibility",
+                "description": "Drop-in routes for OpenAI transcription clients.",
+            },
+            {
+                "name": "Hangry Labs realtime",
+                "description": (
+                    "Progressive bounded-window HTTP sessions used by the browser UI. "
+                    "These are extensions, not OpenAI Realtime WebSocket endpoints."
+                ),
+            },
+            {"name": "Discovery", "description": "Model, language, and capability discovery."},
+            {"name": "Operations", "description": "Liveness, readiness, and inference telemetry."},
+            {"name": "System", "description": "Persistent runtime settings and aligner lifecycle."},
+        ],
+        lifespan=lifespan,
+    )
     app.state.inference_coordinator = coordinator
     app.state.realtime_sessions = realtime_sessions
     app.state.aligner_runtime = aligner_runtime
@@ -687,11 +812,20 @@ def create_app(
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         return _openai_error_response(
             message=str(exc),
-            status_code=422,
+            status_code=400,
             error_type="invalid_request_error",
         )
 
-    @app.get("/health/live")
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled API error for %s %s", request.method, request.url.path, exc_info=exc)
+        return _openai_error_response(
+            message="Internal server error.",
+            status_code=500,
+            error_type="server_error",
+        )
+
+    @app.get("/health/live", tags=["Operations"])
     def health_live() -> Dict[str, Any]:
         return {"status": "ok", "model": model_name}
 
@@ -706,47 +840,41 @@ def create_app(
         }
         return JSONResponse(status_code=200 if payload["status"] == "ok" else 503, content=payload)
 
-    @app.get("/health/ready")
+    @app.get("/health/ready", tags=["Operations"])
     async def health_ready() -> JSONResponse:
         return await readiness_response()
 
-    @app.get("/health")
+    @app.get("/health", tags=["Operations"])
     async def health() -> JSONResponse:
         return await readiness_response()
 
-    @app.get("/metrics/inference")
+    @app.get("/metrics/inference", tags=["Operations"])
     async def inference_metrics() -> Dict[str, Any]:
         return await coordinator.metrics()
 
-    @app.get("/system/aligner", include_in_schema=False)
+    @app.get("/system/aligner", tags=["System"])
     def aligner_status() -> Dict[str, Any]:
         return aligner_snapshot()
 
-    @app.get("/system/settings", include_in_schema=False)
+    @app.get("/system/settings", tags=["System"])
     def system_settings() -> Dict[str, Any]:
         return {"realtime_defaults": runtime_settings.realtime_defaults()}
 
-    @app.put("/system/settings/realtime", include_in_schema=False)
-    async def configure_realtime_defaults(request: Request) -> Dict[str, Any]:
+    @app.put("/system/settings/realtime", tags=["System"], responses=ERROR_RESPONSES)
+    async def configure_realtime_defaults(settings: RealtimeSettingsUpdate) -> Dict[str, Any]:
         try:
-            body = await request.json()
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="Request body must be JSON.") from exc
-        if not isinstance(body, dict):
-            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        try:
-            defaults = runtime_settings.set_realtime_defaults(body)
+            defaults = runtime_settings.set_realtime_defaults(settings.model_dump())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except OSError as exc:
             raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
         return {"realtime_defaults": defaults}
 
-    @app.post("/system/aligner/load", include_in_schema=False)
+    @app.post("/system/aligner/load", tags=["System"], responses=ERROR_RESPONSES)
     async def load_aligner() -> Dict[str, Any]:
         return await ensure_aligner_loaded()
 
-    @app.post("/system/aligner/unload", include_in_schema=False)
+    @app.post("/system/aligner/unload", tags=["System"], responses=ERROR_RESPONSES)
     async def unload_aligner() -> Dict[str, Any]:
         if aligner_runtime is None:
             raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
@@ -765,17 +893,11 @@ def create_app(
         except InferenceUnavailableError as exc:
             raise _inference_http_exception(exc) from exc
 
-    @app.put("/system/aligner", include_in_schema=False)
-    async def configure_aligner(request: Request) -> Dict[str, Any]:
+    @app.put("/system/aligner", tags=["System"], responses=ERROR_RESPONSES)
+    async def configure_aligner(settings: AlignerSettingsUpdate) -> Dict[str, Any]:
         if aligner_runtime is None:
             raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
-        try:
-            body = await request.json()
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="Request body must be JSON.") from exc
-        enabled = body.get("load_aligner_always") if isinstance(body, dict) else None
-        if not isinstance(enabled, bool):
-            raise HTTPException(status_code=400, detail="load_aligner_always must be a boolean.")
+        enabled = settings.load_aligner_always
 
         if enabled:
             await ensure_aligner_loaded()
@@ -798,29 +920,51 @@ def create_app(
         except InferenceUnavailableError as exc:
             raise _inference_http_exception(exc) from exc
 
-    @app.get("/v1/models")
-    def models() -> Dict[str, Any]:
+    @app.get(
+        "/v1/models",
+        tags=["OpenAI compatibility", "Discovery"],
+        response_model=ModelListResponse,
+    )
+    def models() -> ModelListResponse:
         return {
             "object": "list",
             "data": [
                 {
                     "id": model_name,
                     "object": "model",
+                    "created": model_registered_at,
                     "owned_by": "hangry-labs",
                 }
             ],
         }
 
-    @app.get("/v1/models/{requested_model:path}")
-    def retrieve_model(requested_model: str) -> Dict[str, Any]:
+    @app.get(
+        "/v1/models/{requested_model:path}",
+        tags=["OpenAI compatibility", "Discovery"],
+        response_model=ModelObject,
+        responses=ERROR_RESPONSES,
+    )
+    def retrieve_model(requested_model: str) -> ModelObject:
         _validate_model(requested_model, model_name)
         return {
             "id": model_name if requested_model in MODEL_ALIASES else requested_model,
             "object": "model",
+            "created": model_registered_at,
             "owned_by": "hangry-labs",
         }
 
-    @app.post("/v1/audio/transcriptions")
+    @app.post(
+        "/v1/audio/transcriptions",
+        tags=["OpenAI compatibility"],
+        summary="Create transcription",
+        description=(
+            "Transcribe one completed audio file. The request and ordinary response formats are compatible with "
+            "OpenAI transcription clients. `stream=true` returns compatible SSE event shapes after inference; "
+            "use the Hangry Labs realtime session endpoints for progressive microphone transcription."
+        ),
+        responses=TRANSCRIPTION_RESPONSES,
+        openapi_extra=TRANSCRIPTION_OPENAPI_EXTRA,
+    )
     async def transcriptions(request: Request):
         readiness = await coordinator.snapshot()
         if readiness["status"] != "ok":
@@ -833,6 +977,7 @@ def create_app(
                 raise HTTPException(status_code=400, detail="Missing required multipart file field: file")
 
             try:
+                suffix = _upload_suffix(upload)
                 model = _form_string(form, "model")
                 _validate_model(model, model_name)
 
@@ -846,29 +991,35 @@ def create_app(
 
                 response_format = _validate_response_format(_form_string(form, "response_format", "json"))
                 timestamp_granularities = _validate_timestamp_granularities(_form_list(form, "timestamp_granularities"))
+                if timestamp_granularities and response_format != "verbose_json":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="timestamp_granularities requires response_format=verbose_json",
+                    )
                 include = _form_list(form, "include")
                 if include:
                     raise HTTPException(status_code=400, detail=f"Unsupported include values: {include}")
                 _validate_temperature(_form_string(form, "temperature"))
                 stream = _form_bool(form, "stream")
+                if stream and response_format not in {"json", "text"}:
+                    raise HTTPException(status_code=400, detail="stream=true supports response_format json or text")
                 prompt = _form_string(form, "prompt")
-
-                return_time_stamps = bool(timestamp_granularities)
-                if return_time_stamps:
-                    language_error = timestamp_language_error(forced_language)
-                    if language_error:
-                        raise HTTPException(status_code=422, detail=language_error)
-                    await ensure_aligner_loaded()
             except HTTPException:
                 await upload.close()
                 raise
 
-            suffix = Path(upload.filename or "audio.wav").suffix or ".wav"
             with optional_timer("read uploaded audio", trace_requests):
-                payload = await upload.read()
-                await upload.close()
-            if not payload:
-                raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
+                payload = await _read_upload(upload, max_upload_bytes=upload_limit)
+
+            effective_timestamp_granularities = list(timestamp_granularities)
+            if response_format in {"srt", "vtt"}:
+                effective_timestamp_granularities = ["segment"]
+            return_time_stamps = bool(effective_timestamp_granularities)
+            if return_time_stamps:
+                language_error = timestamp_language_error(forced_language)
+                if language_error:
+                    raise HTTPException(status_code=422, detail=language_error)
+                await ensure_aligner_loaded()
 
             with optional_timer("write uploaded audio temp file", trace_requests):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -897,14 +1048,12 @@ def create_app(
                 except ValueError as exc:
                     if return_time_stamps and "not supported by the forced aligner" in str(exc):
                         raise HTTPException(status_code=422, detail=str(exc)) from exc
-                    raise
+                    raise HTTPException(status_code=400, detail=f"Audio could not be transcribed: {exc}") from exc
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
 
             item = result[0]
             if stream:
-                if response_format not in {"json", "text"}:
-                    raise HTTPException(status_code=400, detail="stream=true supports response_format json or text")
                 return _stream_response(item)
             return _json_response(
                 item,
@@ -912,7 +1061,12 @@ def create_app(
                 timestamp_granularities=timestamp_granularities,
             )
 
-    @app.post("/v1/audio/translations")
+    @app.post(
+        "/v1/audio/translations",
+        tags=["OpenAI compatibility"],
+        summary="Create translation (not implemented)",
+        responses={501: {"description": "Qwen3-ASR translation compatibility has not been validated"}},
+    )
     async def translations(request: Request):
         raise HTTPException(
             status_code=501,
@@ -922,23 +1076,25 @@ def create_app(
             ),
         )
 
-    @app.post("/v1/realtime/transcriptions/sessions")
-    async def create_realtime_session(request: Request) -> Dict[str, Any]:
+    @app.post(
+        "/v1/realtime/transcriptions/sessions",
+        tags=["Hangry Labs realtime"],
+        response_model=RealtimeSessionResponse,
+        responses=ERROR_RESPONSES,
+    )
+    async def create_realtime_session(request_data: RealtimeSessionCreateRequest) -> RealtimeSessionResponse:
         purge_expired_sessions()
         readiness = await coordinator.snapshot()
         if readiness["status"] != "ok":
             raise _inference_http_exception(InferenceUnavailableError(readiness["reason"] or "degraded"))
-        try:
-            payload = await request.json()
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+        payload = request_data.model_dump(exclude_none=True)
 
-        model = str(payload.get("model") or "")
+        model = request_data.model
         _validate_model(model, model_name)
-        _validate_temperature(str(payload.get("temperature", "")))
+        _validate_temperature(str(request_data.temperature))
 
         forced_language = None
-        language = str(payload.get("language") or "")
+        language = str(request_data.language or "")
         if language.strip():
             try:
                 forced_language = _normalize_openai_language(language)
@@ -946,14 +1102,11 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         realtime_defaults = runtime_settings.realtime_defaults()
-        try:
-            chunk_size_sec = float(payload.get("chunk_size_sec", realtime_defaults["chunk_size_sec"]))
-            max_window_sec = float(payload.get("max_window_sec", realtime_defaults["max_window_sec"]))
-            unfixed_chunk_num = int(payload.get("unfixed_chunk_num", realtime_defaults["unfixed_chunk_num"]))
-            unfixed_token_num = int(payload.get("unfixed_token_num", realtime_defaults["unfixed_token_num"]))
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="Realtime settings must be numeric.") from exc
-        prompt = str(payload.get("prompt") or "")
+        chunk_size_sec = float(payload.get("chunk_size_sec", realtime_defaults["chunk_size_sec"]))
+        max_window_sec = float(payload.get("max_window_sec", realtime_defaults["max_window_sec"]))
+        unfixed_chunk_num = int(payload.get("unfixed_chunk_num", realtime_defaults["unfixed_chunk_num"]))
+        unfixed_token_num = int(payload.get("unfixed_token_num", realtime_defaults["unfixed_token_num"]))
+        prompt = request_data.prompt
         if not 10 <= max_window_sec <= 60:
             raise HTTPException(status_code=400, detail="max_window_sec must be between 10 and 60 seconds.")
 
@@ -985,16 +1138,21 @@ def create_app(
             created_monotonic=now,
             updated_monotonic=now,
         )
-        return {
-            "id": session_id,
-            "object": "realtime.transcription_session",
-            "model": model_name,
-            "language": forced_language,
-            "chunk_size_sec": chunk_size_sec,
-            "max_window_sec": max_window_sec,
-        }
+        return RealtimeSessionResponse(
+            id=session_id,
+            model=model_name,
+            language=forced_language,
+            chunk_size_sec=chunk_size_sec,
+            max_window_sec=max_window_sec,
+        )
 
-    @app.post("/v1/realtime/transcriptions/sessions/{session_id}/audio")
+    @app.post(
+        "/v1/realtime/transcriptions/sessions/{session_id}/audio",
+        tags=["Hangry Labs realtime"],
+        response_model=RealtimeTranscriptionEvent,
+        responses=ERROR_RESPONSES,
+        openapi_extra=REALTIME_AUDIO_OPENAPI_EXTRA,
+    )
     async def append_realtime_audio(session_id: str, request: Request) -> Dict[str, Any]:
         purge_expired_sessions()
         session = realtime_sessions.get(session_id)
@@ -1011,10 +1169,13 @@ def create_app(
         if not isinstance(upload, (UploadFile, StarletteUploadFile)):
             raise HTTPException(status_code=400, detail="Missing required multipart file field: file")
 
-        suffix = Path(upload.filename or "audio.wav").suffix or ".wav"
-        with optional_timer("read realtime audio chunk", trace_requests):
-            payload = await upload.read()
+        try:
+            suffix = _upload_suffix(upload)
+        except HTTPException:
             await upload.close()
+            raise
+        with optional_timer("read realtime audio chunk", trace_requests):
+            payload = await _read_upload(upload, max_upload_bytes=upload_limit, allow_empty=True)
         if not payload:
             return _realtime_payload(session_id, session.state, final=False)
 
@@ -1059,7 +1220,12 @@ def create_app(
 
         return _realtime_payload(session_id, session.state, final=False)
 
-    @app.post("/v1/realtime/transcriptions/sessions/{session_id}/finish")
+    @app.post(
+        "/v1/realtime/transcriptions/sessions/{session_id}/finish",
+        tags=["Hangry Labs realtime"],
+        response_model=RealtimeTranscriptionEvent,
+        responses=ERROR_RESPONSES,
+    )
     async def finish_realtime_session(session_id: str) -> Dict[str, Any]:
         purge_expired_sessions()
         session = realtime_sessions.get(session_id)
@@ -1100,7 +1266,12 @@ def create_app(
         realtime_sessions.pop(session_id, None)
         return _realtime_payload(session_id, session.state, final=True)
 
-    @app.delete("/v1/realtime/transcriptions/sessions/{session_id}")
+    @app.delete(
+        "/v1/realtime/transcriptions/sessions/{session_id}",
+        tags=["Hangry Labs realtime"],
+        response_model=RealtimeSessionDeleteResponse,
+        responses=ERROR_RESPONSES,
+    )
     async def delete_realtime_session(session_id: str) -> Dict[str, Any]:
         purge_expired_sessions()
         session = realtime_sessions.get(session_id)
@@ -1112,8 +1283,12 @@ def create_app(
         realtime_sessions.pop(session_id, None)
         return {"id": session_id, "deleted": True}
 
-    @app.get("/v1/audio/supported_languages")
-    def supported_languages() -> Dict[str, Any]:
+    @app.get(
+        "/v1/audio/supported_languages",
+        tags=["Discovery"],
+        response_model=SupportedLanguagesResponse,
+    )
+    def supported_languages() -> SupportedLanguagesResponse:
         return {"languages": list(SUPPORTED_LANGUAGES)}
 
     return app

@@ -100,6 +100,8 @@ Snapshot tags are not published.
 
 ## API Example
 
+The stable integration endpoint is `POST /v1/audio/transcriptions`, tested with the current OpenAI Python client. Interactive request and response documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs). Uploads are tested with `aac`, `flac`, `mp3`, `mp4`, `mpeg`, `mpga`, `m4a`, `ogg`, `wav`, and `webm`; other formats are passed to the bundled decoder. The configurable default limit is 100 MB. Because the deployment serves one loaded model, `model` may be omitted and that model is selected automatically.
+
 Transcribe an audio file:
 
 ```bash
@@ -108,6 +110,21 @@ curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
   -F "model=qwen3-asr" \
   -F "response_format=json"
 ```
+
+Request exact timestamps:
+
+```bash
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
+  -F "file=@sample.mp3" \
+  -F "model=qwen3-asr" \
+  -F "response_format=verbose_json" \
+  -F "timestamp_granularities[]=word" \
+  -F "timestamp_granularities[]=segment"
+```
+
+`verbose_json` includes detected language, audio duration, and a coarse whole-audio segment without alignment. Requested word/segment timestamps use the forced aligner. `srt` and `vtt` automatically request accurate segment alignment instead of generating placeholder timings. Timestamp granularities require `response_format=verbose_json`.
+
+Temperature is intentionally fixed at `0`: both backends use deterministic greedy decoding for stable transcription. This is a product choice rather than a claim that the underlying model could never be sampled.
 
 Force a language when needed:
 
@@ -138,16 +155,21 @@ with open("sample.mp3", "rb") as audio:
 print(result.text)
 ```
 
+The local server does not authenticate the placeholder `api_key="local"`. Keep it on a trusted local/private network or add an authenticating reverse proxy. For loopback-only Docker access, publish with `-p 127.0.0.1:8000:8000`.
+
 Useful routes:
 
 - `GET /health` (readiness-compatible alias)
 - `GET /health/live`
 - `GET /health/ready`
 - `GET /metrics/inference`
+- `GET /system/gpu`
 - `GET /system/aligner`
 - `PUT /system/aligner`
 - `POST /system/aligner/load`
 - `POST /system/aligner/unload`
+- `GET /system/settings`
+- `PUT /system/settings/realtime`
 - `GET /v1/models`
 - `GET /v1/models/{model}`
 - `POST /v1/audio/transcriptions`
@@ -157,7 +179,7 @@ Useful routes:
 - `POST /v1/realtime/transcriptions/sessions/{session_id}/finish`
 - `DELETE /v1/realtime/transcriptions/sessions/{session_id}`
 
-The realtime session API is local and experimental. It repeatedly decodes a configurable recent-audio window and retains older stable transcript text outside the prompt, preventing inference latency and model context from growing without bound. It is used by the browser UI, but it is not a full OpenAI Realtime WebSocket implementation.
+`stream=true` on the file endpoint returns OpenAI-compatible `transcript.text.delta` and `transcript.text.done` SSE events after completed-file inference. The realtime session API used by the Stream tab is different: it accepts audio progressively, repeatedly decodes a configurable recent-audio window, and retains older stable transcript text outside the prompt. This produces live updates while recording and prevents inference latency and context from growing without bound, but its HTTP session protocol is not the OpenAI Realtime WebSocket protocol.
 
 ## Runtime Configuration
 
@@ -202,6 +224,7 @@ Common knobs:
 - `QWEN_ASR_SETTINGS_PATH=/app/persistent/app/settings.json`
 - `QWEN_ASR_ALIGNER_LOAD_TIMEOUT_SECONDS=600`
 - `QWEN_ASR_MAX_NEW_TOKENS=512`
+- `QWEN_ASR_MAX_UPLOAD_MB=100`
 - `QWEN_ASR_GPU_MEMORY_UTILIZATION=0.25`
 - `QWEN_ASR_MAX_MODEL_LEN=2048`
 - `QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048`

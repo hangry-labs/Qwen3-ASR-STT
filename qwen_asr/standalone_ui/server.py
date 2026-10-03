@@ -97,7 +97,12 @@ def attach_ui(*, api_app: FastAPI) -> FastAPI:
     async def examples() -> dict[str, list[dict[str, str]]]:
         return {"examples": _example_catalog()}
 
-    @api_app.get("/system/gpu", include_in_schema=False)
+    @api_app.get(
+        "/system/gpu",
+        tags=["System"],
+        summary="Current GPU telemetry",
+        description="Return the latest locally sampled NVIDIA GPU metrics used by the System tab.",
+    )
     def gpu() -> JSONResponse:
         return JSONResponse(GPU_MONITOR.request_snapshot(), headers={"Cache-Control": "no-store"})
 

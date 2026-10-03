@@ -86,10 +86,13 @@ class ASRTranscription:
         time_stamps (Optional[Any]):
             Forced aligner output (ForcedAlignResult).
             Present only when return_time_stamps=True.
+        duration (Optional[float]):
+            Normalized input-audio duration in seconds.
     """
     language: str
     text: str
     time_stamps: Optional[Any] = None
+    duration: Optional[float] = None
 
 
 @dataclass
@@ -553,7 +556,14 @@ class Qwen3ASRModel:
             merged_align = None
             if return_time_stamps:
                 merged_align = self._merge_align_results(out_aligns[i])
-            results.append(ASRTranscription(language=merged_language, text=merged_text, time_stamps=merged_align))
+            results.append(
+                ASRTranscription(
+                    language=merged_language,
+                    text=merged_text,
+                    time_stamps=merged_align,
+                    duration=round(len(wavs[i]) / SAMPLE_RATE, 3),
+                )
+            )
 
         return results
 

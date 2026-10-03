@@ -12,7 +12,9 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import httpx
 from fastapi.testclient import TestClient
+from openai import OpenAI
 
 from qwen_asr.server.openai_api import _segments_payload, create_app
 from qwen_asr.server.aligner_runtime import RuntimeSettingsStore
@@ -35,6 +37,7 @@ class FakeResult:
     text: str
     language: str = "English"
     time_stamps: Any = None
+    duration: float = 1.0
 
 
 class FakeASR:
@@ -251,6 +254,50 @@ def _wav(seconds: float = 1.0) -> bytes:
 
 
 class OpenAIApiTests(unittest.TestCase):
+    def test_current_openai_python_client_contract(self):
+        app_client = _client()
+
+        def forward(request: httpx.Request) -> httpx.Response:
+            response = app_client.request(
+                request.method,
+                request.url.raw_path.decode("ascii"),
+                headers=dict(request.headers),
+                content=request.content,
+            )
+            return httpx.Response(
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                content=response.content,
+                request=request,
+            )
+
+        http_client = httpx.Client(transport=httpx.MockTransport(forward))
+        client = OpenAI(base_url="http://testserver/v1", api_key="local", http_client=http_client)
+        try:
+            models = client.models.list()
+            result = client.audio.transcriptions.create(
+                model="qwen3-asr",
+                file=("sample.wav", b"fake audio bytes", "audio/wav"),
+                prompt="domain vocabulary",
+                language="en",
+                response_format="json",
+                temperature=0,
+            )
+            stream = client.audio.transcriptions.create(
+                model="qwen3-asr",
+                file=("sample.wav", b"fake audio bytes", "audio/wav"),
+                stream=True,
+            )
+            events = list(stream)
+        finally:
+            client.close()
+            app_client.close()
+
+        self.assertEqual(models.data[0].id, "Qwen/Qwen3-ASR-0.6B-hf")
+        self.assertIsInstance(models.data[0].created, int)
+        self.assertEqual(result.text, "hello world")
+        self.assertEqual([event.type for event in events], ["transcript.text.delta", "transcript.text.done"])
+
     def test_json_transcription_accepts_sdk_style_fields(self):
         asr = FakeASR()
         response = _client(asr).post(
@@ -283,7 +330,8 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertIsNone(asr.calls[0]["language"])
 
     def test_text_srt_and_vtt_response_formats(self):
-        client = _client()
+        asr = FakeASR(forced_aligner=object())
+        client = _client(asr)
 
         text = client.post(
             "/v1/audio/transcriptions",
@@ -299,7 +347,7 @@ class OpenAIApiTests(unittest.TestCase):
             data={"model": "qwen3-asr", "response_format": "srt"},
         )
         self.assertEqual(srt.status_code, 200)
-        self.assertIn("00:00:00,000 -->", srt.text)
+        self.assertIn("00:00:00,000 --> 00:00:00,700", srt.text)
 
         vtt = client.post(
             "/v1/audio/transcriptions",
@@ -308,6 +356,49 @@ class OpenAIApiTests(unittest.TestCase):
         )
         self.assertEqual(vtt.status_code, 200)
         self.assertTrue(vtt.text.startswith("WEBVTT"))
+        self.assertIn("00:00:00.000 --> 00:00:00.700", vtt.text)
+        self.assertFalse(asr.calls[0]["return_time_stamps"])
+        self.assertTrue(all(call["return_time_stamps"] for call in asr.calls[1:]))
+
+    def test_verbose_json_without_alignment_has_duration_and_coarse_segment(self):
+        response = _client().post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={"model": "qwen3-asr", "response_format": "verbose_json"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["task"], "transcribe")
+        self.assertEqual(payload["duration"], 1.0)
+        self.assertEqual(payload["segments"], [
+            {
+                "id": 0,
+                "seek": 0,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "hello world",
+                "tokens": [],
+                "temperature": 0.0,
+                "avg_logprob": None,
+                "compression_ratio": None,
+                "no_speech_prob": None,
+            }
+        ])
+
+    def test_explicit_timestamp_granularities_require_verbose_json(self):
+        response = _client(FakeASR(forced_aligner=object())).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={
+                "model": "qwen3-asr",
+                "response_format": "json",
+                "timestamp_granularities[]": "word",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("response_format=verbose_json", response.json()["error"]["message"])
 
     def test_verbose_json_with_timestamps_requires_aligner_and_returns_words(self):
         no_aligner = _client()
@@ -455,6 +546,7 @@ class OpenAIApiTests(unittest.TestCase):
                     "max_window_sec": 20,
                     "unfixed_chunk_num": 3,
                     "unfixed_token_num": 8,
+                    "client_extension": True,
                 },
             )
 
@@ -527,10 +619,64 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["type"], "invalid_request_error")
 
+    def test_model_can_be_omitted_for_the_single_loaded_model(self):
+        response = _client().post("/v1/audio/transcriptions", files=_files())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "hello world")
+
+    def test_decoder_extensions_are_permissive_and_upload_size_is_bounded(self):
+        custom_extension = _client().post(
+            "/v1/audio/transcriptions",
+            files={"file": ("sample.custom", b"decoder-owned bytes", "application/octet-stream")},
+        )
+        aac = _client().post(
+            "/v1/audio/transcriptions",
+            files={"file": ("sample.aac", b"aac bytes", "audio/aac")},
+        )
+        limited = TestClient(
+            create_app(
+                asr=FakeASR(),
+                model_name="Qwen/Qwen3-ASR-0.6B-hf",
+                concurrency=1,
+                max_upload_bytes=4,
+            )
+        ).post(
+            "/v1/audio/transcriptions",
+            files={"file": ("sample.wav", b"12345", "audio/wav")},
+            data={"model": "qwen3-asr"},
+        )
+
+        self.assertEqual(custom_extension.status_code, 200)
+        self.assertEqual(aac.status_code, 200)
+        self.assertEqual(limited.status_code, 413)
+        self.assertEqual(limited.json()["error"]["type"], "invalid_request_error")
+
     def test_retrieve_model_alias(self):
         response = _client().get("/v1/models/qwen3-asr")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "Qwen/Qwen3-ASR-0.6B-hf")
+        self.assertIsInstance(response.json()["created"], int)
+
+    def test_openapi_documents_transcription_and_realtime_contracts(self):
+        schema = _client().get("/openapi.json").json()
+        transcription = schema["paths"]["/v1/audio/transcriptions"]["post"]
+        properties = transcription["requestBody"]["content"]["multipart/form-data"]["schema"]["properties"]
+        realtime = schema["paths"]["/v1/realtime/transcriptions/sessions"]["post"]
+
+        self.assertEqual(
+            transcription["requestBody"]["content"]["multipart/form-data"]["schema"]["required"],
+            ["file"],
+        )
+        self.assertIn("prompt", properties)
+        self.assertIn("timestamp_granularities", properties)
+        self.assertIn("text/event-stream", transcription["responses"]["200"]["content"])
+        self.assertEqual(
+            len(transcription["responses"]["200"]["content"]["application/json"]["schema"]["oneOf"]),
+            2,
+        )
+        self.assertIn("requestBody", realtime)
+        self.assertIn("/system/settings/realtime", schema["paths"])
 
     def test_readiness_reports_timestamp_capability(self):
         without_aligner = _client().get("/health/ready")
@@ -556,13 +702,20 @@ class OpenAIApiTests(unittest.TestCase):
 
         created = client.post(
             "/v1/realtime/transcriptions/sessions",
-            json={"model": "qwen3-asr", "language": "en", "temperature": 0, "chunk_size_sec": 2.0},
+            json={"language": "en", "temperature": 0, "chunk_size_sec": 2.0, "client_extension": True},
         )
         self.assertEqual(created.status_code, 200)
         session_id = created.json()["id"]
         self.assertTrue(session_id.startswith("rt_"))
         self.assertEqual(created.json()["max_window_sec"], 30.0)
         self.assertEqual(asr.calls[0]["streaming_init"]["max_window_sec"], 30.0)
+
+        empty = client.post(
+            f"/v1/realtime/transcriptions/sessions/{session_id}/audio",
+            files={"file": ("chunk.wav", b"", "audio/wav")},
+        )
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["audio_seconds"], 0.0)
 
         first = client.post(
             f"/v1/realtime/transcriptions/sessions/{session_id}/audio",

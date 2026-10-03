@@ -16,6 +16,7 @@ nagisa==0.3.0
 fastapi==0.136.3
 uvicorn==0.51.0
 python-multipart==0.0.32
+openai==3.24.0
 numpy==2.2.6
 scipy==1.18.1
 librosa==0.11.0
