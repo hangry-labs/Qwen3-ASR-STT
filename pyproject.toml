@@ -27,6 +27,7 @@ dependencies = [
   "vllm[audio]==0.26.0",
   "accelerate==1.14.0",
   "qwen-omni-utils==0.0.9",
+  "nagisa==0.3.0",
   "librosa==0.11.0",
   "soundfile==0.13.1",
   "sox==1.5.0",

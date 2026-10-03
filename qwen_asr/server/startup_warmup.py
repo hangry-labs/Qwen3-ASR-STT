@@ -47,3 +47,21 @@ def run_startup_warmup(asr: Any) -> None:
             audio=warmup_audio,
             aligner_text=warmup_text,
         )
+
+
+def run_aligner_warmup(aligner: Any) -> None:
+    """Compile and initialize a lazily loaded aligner before it is advertised ready."""
+    if not _enabled(os.getenv("QWEN_ASR_STARTUP_WARMUP"), default=False):
+        return
+
+    default_audio = Path(__file__).resolve().parents[2] / "testbench/assets/english/random/01.mp3"
+    configured_audio = os.getenv("QWEN_ASR_STARTUP_WARMUP_AUDIO")
+    warmup_audio = configured_audio or (str(default_audio) if default_audio.is_file() else None)
+    warmup_text = os.getenv("QWEN_ASR_STARTUP_WARMUP_TEXT", DEFAULT_WARMUP_TEXT)
+    if warmup_audio is None:
+        import numpy as np
+
+        warmup_audio = (np.zeros((8_000,), dtype=np.float32), 16_000)
+
+    with StartupTimer("forced aligner on-demand warmup"):
+        aligner.warm_up(audio=warmup_audio, text=warmup_text, language="English")

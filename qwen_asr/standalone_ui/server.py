@@ -12,8 +12,9 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from qwen_asr.server.aligner_runtime import AlignerRuntime, RuntimeSettingsStore
 from qwen_asr.server.openai_api import create_app as create_openai_app
-from qwen_asr.server.startup_warmup import run_startup_warmup
+from qwen_asr.server.startup_warmup import run_aligner_warmup, run_startup_warmup
 from qwen_asr.startup_logging import StartupTimer, log_startup
 from qwen_asr.web.gpu import GPU_MONITOR
 
@@ -125,6 +126,8 @@ def run_server(
     *,
     asr_checkpoint: str,
     aligner_checkpoint: str | None,
+    load_aligner_at_startup: bool,
+    settings_path: str,
     backend: str,
     model_kwargs: Dict[str, Any] | None,
     aligner_kwargs: Dict[str, Any] | None,
@@ -149,7 +152,6 @@ def run_server(
 
     resolved_model_kwargs = _coerce_special_types(model_kwargs or {})
     resolved_aligner_kwargs = _coerce_special_types(aligner_kwargs or {})
-    forced_aligner = aligner_checkpoint if aligner_checkpoint else None
 
     with StartupTimer("import Qwen3ASRModel"):
         from qwen_asr.inference.qwen3_asr import Qwen3ASRModel
@@ -163,10 +165,21 @@ def run_server(
             raise ValueError(f"Unsupported backend: {backend}")
         asr = loader(
             asr_checkpoint,
-            forced_aligner=forced_aligner,
-            forced_aligner_kwargs=resolved_aligner_kwargs if forced_aligner else None,
             **resolved_model_kwargs,
         )
+
+    settings = RuntimeSettingsStore(settings_path)
+    aligner_runtime = AlignerRuntime(
+        asr=asr,
+        checkpoint=aligner_checkpoint,
+        model_kwargs=resolved_aligner_kwargs,
+        settings=settings,
+        default_load_always=load_aligner_at_startup,
+        warmup=run_aligner_warmup,
+    )
+    if aligner_runtime.load_always:
+        with StartupTimer("load persistent forced aligner"):
+            aligner_runtime.load(warm_up=False)
 
     trace_requests = os.getenv("QWEN_ASR_TRACE_REQUESTS", "0").strip().lower() in {
         "1",
@@ -181,6 +194,7 @@ def run_server(
             concurrency=concurrency,
             trace_requests=trace_requests,
             startup_warmup=lambda: run_startup_warmup(asr),
+            aligner_runtime=aligner_runtime,
         )
         app = create_app(api_app=api_app)
 

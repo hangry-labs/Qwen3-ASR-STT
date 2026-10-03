@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -19,6 +20,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from qwen_asr.inference.utils import SUPPORTED_LANGUAGES, normalize_audios, normalize_language_name, validate_language
+from qwen_asr.server.aligner_runtime import (
+    ALIGNER_MODEL_SUPPORTED_LANGUAGES,
+    DEFAULT_SETTINGS_PATH,
+    AlignerRuntime,
+    AlignerUnavailableError,
+    RuntimeSettingsStore,
+    aligner_language_capabilities,
+)
 from qwen_asr.server.inference_runtime import (
     DEFAULT_INFERENCE_TIMEOUT_SECONDS,
     DEFAULT_QUEUE_TIMEOUT_SECONDS,
@@ -33,6 +42,10 @@ from qwen_asr.startup_logging import StartupTimer, log_startup, optional_timer
 MODEL_ALIASES = {"qwen3-asr", "qwen3-asr-stt"}
 RESPONSE_FORMATS = {"json", "text", "verbose_json", "srt", "vtt"}
 TIMESTAMP_GRANULARITIES = {"segment", "word"}
+SEGMENT_SILENCE_GAP_SECONDS = 0.75
+SEGMENT_MAX_SECONDS = 12.0
+SEGMENT_TERMINATORS = (".", "!", "?", "。", "！", "？")
+NO_SPACE_ALIGNMENT_LANGUAGES = {"Chinese", "Cantonese", "Japanese"}
 LANGUAGE_ALIASES = {
     "zh": "Chinese",
     "chinese": "Chinese",
@@ -225,23 +238,87 @@ def _words_payload(item: Any) -> list[dict[str, Any]]:
     return words
 
 
+def _alignment_dependency_message(exc: ImportError) -> str:
+    message = str(exc).strip()
+    if "soynlp" in message.lower():
+        return (
+            "Korean timestamp alignment is not available in this image because its optional "
+            "soynlp tokenizer is not bundled. Korean transcription without timestamps remains available."
+        )
+    return f"Timestamp alignment is unavailable for this language: {message}"
+
+
+def _segment_text(words: list[dict[str, Any]], language: str) -> str:
+    parts = [str(word.get("word") or "") for word in words]
+    if language in NO_SPACE_ALIGNMENT_LANGUAGES:
+        return "".join(parts).strip()
+    text = " ".join(part.strip() for part in parts if part.strip())
+    return re.sub(r"\s+([,.;:!?%\)\]\}])", r"\1", text).strip()
+
+
+def _project_terminal_punctuation(text: str, words: list[dict[str, Any]]) -> dict[int, str]:
+    """Map transcript sentence endings back onto punctuation-free aligner words."""
+    transcript_length = sum(character.isalnum() for character in text)
+    aligned_lengths = [sum(character.isalnum() for character in str(word.get("word") or "")) for word in words]
+    aligned_length = sum(aligned_lengths)
+    if transcript_length <= 0 or aligned_length <= 0:
+        return {}
+
+    transcript_boundaries: dict[int, str] = {}
+    position = 0
+    for character in text:
+        if character.isalnum():
+            position += 1
+        elif character in SEGMENT_TERMINATORS and position:
+            transcript_boundaries[position] = transcript_boundaries.get(position, "") + character
+
+    projected: dict[int, str] = {}
+    cumulative = 0
+    word_index = 0
+    for transcript_position, punctuation in transcript_boundaries.items():
+        target = transcript_position / transcript_length * aligned_length
+        while word_index < len(words) - 1 and cumulative + aligned_lengths[word_index] < target:
+            cumulative += aligned_lengths[word_index]
+            word_index += 1
+        projected[word_index] = projected.get(word_index, "") + punctuation
+    return projected
+
+
 def _segments_payload(item: Any) -> list[dict[str, Any]]:
     words = _words_payload(item)
     if not words:
         return []
+    punctuation = _project_terminal_punctuation(str(getattr(item, "text", "") or ""), words)
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for index, word in enumerate(words):
+        suffix = punctuation.get(index, "")
+        if suffix and not str(word.get("word") or "").rstrip().endswith(SEGMENT_TERMINATORS):
+            word = {**word, "word": f"{word.get('word') or ''}{suffix}"}
+        current.append(word)
+        next_word = words[index + 1] if index + 1 < len(words) else None
+        gap_after = max(0.0, float(next_word["start"]) - float(word["end"])) if next_word else 0.0
+        duration = float(word["end"]) - float(current[0]["start"])
+        terminal = bool(suffix) or str(word.get("word") or "").rstrip().endswith(SEGMENT_TERMINATORS)
+        if next_word is None or terminal or gap_after >= SEGMENT_SILENCE_GAP_SECONDS or duration >= SEGMENT_MAX_SECONDS:
+            groups.append(current)
+            current = []
+
+    language = str(getattr(item, "language", "") or "")
     return [
         {
-            "id": 0,
-            "seek": 0,
-            "start": words[0]["start"],
-            "end": words[-1]["end"],
-            "text": item.text,
+            "id": index,
+            "seek": round(float(group[0]["start"]) * 100),
+            "start": float(group[0]["start"]),
+            "end": float(group[-1]["end"]),
+            "text": _segment_text(group, language),
             "tokens": [],
             "temperature": 0.0,
             "avg_logprob": None,
             "compression_ratio": None,
             "no_speech_prob": None,
         }
+        for index, group in enumerate(groups)
     ]
 
 
@@ -262,14 +339,21 @@ def _timestamp(seconds: float, *, decimal: str) -> str:
 
 
 def _srt_response(item: Any) -> PlainTextResponse:
-    end = _duration(item) or 0.001
-    body = f"1\n{_timestamp(0, decimal=',')} --> {_timestamp(end, decimal=',')}\n{item.text}\n"
+    segments = _segments_payload(item) or [{"start": 0.0, "end": _duration(item) or 0.001, "text": item.text}]
+    body = "\n".join(
+        f"{index}\n{_timestamp(segment['start'], decimal=',')} --> {_timestamp(segment['end'], decimal=',')}\n{segment['text']}\n"
+        for index, segment in enumerate(segments, start=1)
+    )
     return PlainTextResponse(body, media_type="application/x-subrip")
 
 
 def _vtt_response(item: Any) -> PlainTextResponse:
-    end = _duration(item) or 0.001
-    body = f"WEBVTT\n\n{_timestamp(0, decimal='.')} --> {_timestamp(end, decimal='.')}\n{item.text}\n"
+    segments = _segments_payload(item) or [{"start": 0.0, "end": _duration(item) or 0.001, "text": item.text}]
+    cues = "\n".join(
+        f"{_timestamp(segment['start'], decimal='.')} --> {_timestamp(segment['end'], decimal='.')}\n{segment['text']}\n"
+        for segment in segments
+    )
+    body = f"WEBVTT\n\n{cues}"
     return PlainTextResponse(body, media_type="text/vtt")
 
 
@@ -377,6 +461,7 @@ def create_app(
     recycle_process: Callable[[str], None] | None = None,
     enable_watchdog: bool | None = None,
     startup_warmup: Callable[[], Any] | None = None,
+    aligner_runtime: AlignerRuntime | None = None,
 ) -> FastAPI:
     realtime_sessions: dict[str, _RealtimeSession] = {}
     inference_timeout = float(
@@ -406,8 +491,15 @@ def create_app(
         0.001,
         float(os.getenv("QWEN_ASR_STARTUP_WARMUP_TIMEOUT_SECONDS", "600")),
     )
+    aligner_load_timeout = max(
+        0.001,
+        float(os.getenv("QWEN_ASR_ALIGNER_LOAD_TIMEOUT_SECONDS", "600")),
+    )
     default_watchdog_audio = Path(__file__).resolve().parents[2] / "testbench/assets/english/random/01.mp3"
     watchdog_audio = Path(os.getenv("QWEN_ASR_WATCHDOG_AUDIO", str(default_watchdog_audio)))
+    runtime_settings = getattr(aligner_runtime, "settings", None) or RuntimeSettingsStore(
+        os.getenv("QWEN_ASR_SETTINGS_PATH", DEFAULT_SETTINGS_PATH)
+    )
 
     def session_diagnostics() -> dict[str, Any]:
         now = time.monotonic()
@@ -529,6 +621,64 @@ def create_app(
     app = FastAPI(title="Qwen3-ASR OpenAI-compatible API", lifespan=lifespan)
     app.state.inference_coordinator = coordinator
     app.state.realtime_sessions = realtime_sessions
+    app.state.aligner_runtime = aligner_runtime
+
+    def aligner_snapshot() -> dict[str, Any]:
+        if aligner_runtime is not None:
+            return aligner_runtime.snapshot()
+        loaded = getattr(asr, "forced_aligner", None) is not None
+        available_languages, unavailable_languages = aligner_language_capabilities()
+        return {
+            "configured": loaded,
+            "loaded": loaded,
+            "status": "loaded" if loaded else "unavailable",
+            "load_always": loaded,
+            "model": None,
+            "last_error": None,
+            "model_supported_languages": list(ALIGNER_MODEL_SUPPORTED_LANGUAGES),
+            "available_languages": available_languages,
+            "unavailable_languages": unavailable_languages,
+        }
+
+    def timestamp_language_error(language: str | None) -> str | None:
+        if language is None:
+            return None
+        aligner = aligner_snapshot()
+        supported = aligner.get("model_supported_languages") or []
+        if supported and language not in supported:
+            return (
+                f"{language} transcription is supported, but the configured forced aligner does not support "
+                f"{language} timestamps. Supported timestamp languages: {', '.join(supported)}."
+            )
+        unavailable = aligner.get("unavailable_languages") or {}
+        return unavailable.get(language)
+
+    async def ensure_aligner_loaded() -> dict[str, Any]:
+        snapshot = aligner_snapshot()
+        if snapshot["loaded"]:
+            return snapshot
+        if aligner_runtime is None or not snapshot["configured"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Timestamp output is unavailable because no forced-aligner model is configured.",
+            )
+        try:
+            return await coordinator.run(
+                "aligner_load",
+                aligner_runtime.load,
+                warm_up=True,
+                language_mode="alignment",
+                deadline_seconds=aligner_load_timeout,
+            )
+        except AlignerUnavailableError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InferenceUnavailableError as exc:
+            raise _inference_http_exception(exc) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Forced aligner could not be loaded: {type(exc).__name__}: {exc}",
+            ) from exc
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
@@ -548,10 +698,12 @@ def create_app(
 
     async def readiness_response() -> JSONResponse:
         payload = await coordinator.snapshot()
-        timestamps_available = getattr(asr, "forced_aligner", None) is not None
+        aligner = aligner_snapshot()
         payload["capabilities"] = {
-            "timestamps": timestamps_available,
-            "timestamp_granularities": ["word", "segment"] if timestamps_available else [],
+            "timestamps": aligner["configured"],
+            "timestamps_loaded": aligner["loaded"],
+            "timestamp_granularities": ["word", "segment"] if aligner["configured"] else [],
+            "forced_aligner": aligner,
         }
         return JSONResponse(status_code=200 if payload["status"] == "ok" else 503, content=payload)
 
@@ -566,6 +718,86 @@ def create_app(
     @app.get("/metrics/inference")
     async def inference_metrics() -> Dict[str, Any]:
         return await coordinator.metrics()
+
+    @app.get("/system/aligner", include_in_schema=False)
+    def aligner_status() -> Dict[str, Any]:
+        return aligner_snapshot()
+
+    @app.get("/system/settings", include_in_schema=False)
+    def system_settings() -> Dict[str, Any]:
+        return {"realtime_defaults": runtime_settings.realtime_defaults()}
+
+    @app.put("/system/settings/realtime", include_in_schema=False)
+    async def configure_realtime_defaults(request: Request) -> Dict[str, Any]:
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Request body must be JSON.") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        try:
+            defaults = runtime_settings.set_realtime_defaults(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
+        return {"realtime_defaults": defaults}
+
+    @app.post("/system/aligner/load", include_in_schema=False)
+    async def load_aligner() -> Dict[str, Any]:
+        return await ensure_aligner_loaded()
+
+    @app.post("/system/aligner/unload", include_in_schema=False)
+    async def unload_aligner() -> Dict[str, Any]:
+        if aligner_runtime is None:
+            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
+        if aligner_runtime.load_always:
+            raise HTTPException(
+                status_code=409,
+                detail="Disable 'Always keep aligner loaded' before unloading it.",
+            )
+        try:
+            return await coordinator.run(
+                "aligner_unload",
+                aligner_runtime.unload,
+                language_mode="alignment",
+                deadline_seconds=aligner_load_timeout,
+            )
+        except InferenceUnavailableError as exc:
+            raise _inference_http_exception(exc) from exc
+
+    @app.put("/system/aligner", include_in_schema=False)
+    async def configure_aligner(request: Request) -> Dict[str, Any]:
+        if aligner_runtime is None:
+            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Request body must be JSON.") from exc
+        enabled = body.get("load_aligner_always") if isinstance(body, dict) else None
+        if not isinstance(enabled, bool):
+            raise HTTPException(status_code=400, detail="load_aligner_always must be a boolean.")
+
+        if enabled:
+            await ensure_aligner_loaded()
+            try:
+                aligner_runtime.set_load_always(True)
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
+            return aligner_runtime.snapshot()
+
+        try:
+            aligner_runtime.set_load_always(False)
+            return await coordinator.run(
+                "aligner_unload",
+                aligner_runtime.unload,
+                language_mode="alignment",
+                deadline_seconds=aligner_load_timeout,
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
+        except InferenceUnavailableError as exc:
+            raise _inference_http_exception(exc) from exc
 
     @app.get("/v1/models")
     def models() -> Dict[str, Any]:
@@ -623,11 +855,11 @@ def create_app(
                 prompt = _form_string(form, "prompt")
 
                 return_time_stamps = bool(timestamp_granularities)
-                if return_time_stamps and getattr(asr, "forced_aligner", None) is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="timestamp_granularities requires QWEN_ASR_ENABLE_ALIGNER=1",
-                    )
+                if return_time_stamps:
+                    language_error = timestamp_language_error(forced_language)
+                    if language_error:
+                        raise HTTPException(status_code=422, detail=language_error)
+                    await ensure_aligner_loaded()
             except HTTPException:
                 await upload.close()
                 raise
@@ -658,6 +890,15 @@ def create_app(
                         )
                 except InferenceUnavailableError as exc:
                     raise _inference_http_exception(exc) from exc
+                except ImportError as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=_alignment_dependency_message(exc),
+                    ) from exc
+                except ValueError as exc:
+                    if return_time_stamps and "not supported by the forced aligner" in str(exc):
+                        raise HTTPException(status_code=422, detail=str(exc)) from exc
+                    raise
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
 
@@ -705,9 +946,10 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        chunk_size_sec = float(payload.get("chunk_size_sec", 2.0))
-        unfixed_chunk_num = int(payload.get("unfixed_chunk_num", 2))
-        unfixed_token_num = int(payload.get("unfixed_token_num", 5))
+        realtime_defaults = runtime_settings.realtime_defaults()
+        chunk_size_sec = float(payload.get("chunk_size_sec", realtime_defaults["chunk_size_sec"]))
+        unfixed_chunk_num = int(payload.get("unfixed_chunk_num", realtime_defaults["unfixed_chunk_num"]))
+        unfixed_token_num = int(payload.get("unfixed_token_num", realtime_defaults["unfixed_token_num"]))
         prompt = str(payload.get("prompt") or "")
 
         if not hasattr(asr, "init_streaming_state"):

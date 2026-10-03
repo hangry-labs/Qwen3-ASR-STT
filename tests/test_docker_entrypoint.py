@@ -141,6 +141,9 @@ class DockerEntrypointTests(unittest.TestCase):
         self.assertEqual(captured["model_kwargs"]["max_model_len"], 2048)
         self.assertEqual(captured["model_kwargs"]["gpu_memory_utilization"], 0.25)
         self.assertEqual(captured["model_kwargs"]["generation_config"], "vllm")
+        self.assertEqual(captured["settings_path"], "/app/persistent/app/settings.json")
+        self.assertFalse(captured["load_aligner_at_startup"])
+        self.assertEqual(captured["aligner_checkpoint"], "Qwen/Qwen3-ForcedAligner-0.6B-hf")
 
     def test_main_starts_combined_server_with_native_aligner(self):
         captured = {}
@@ -162,6 +165,7 @@ class DockerEntrypointTests(unittest.TestCase):
 
         self.assertEqual(captured["asr_checkpoint"], "Qwen/Qwen3-ASR-1.7B-hf")
         self.assertEqual(captured["aligner_checkpoint"], "Qwen/Qwen3-ForcedAligner-0.6B-hf")
+        self.assertTrue(captured["load_aligner_at_startup"])
         self.assertEqual(captured["aligner_kwargs"]["dtype"], "bfloat16")
         self.assertEqual(captured["aligner_kwargs"]["device_map"], "cuda:0")
         self.assertTrue(captured["aligner_kwargs"]["torch_compile"])

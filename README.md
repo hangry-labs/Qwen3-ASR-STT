@@ -28,12 +28,10 @@ This Hangry Labs fork is built for local inference. The goal is simple: pull or 
 Run the full baked image with NVIDIA GPU support:
 
 ```bash
-docker volume create qwen3_asr_stt_torch_compile_cache
-docker volume create qwen3_asr_stt_vllm_cache
+docker volume create qwen3_asr_stt_data
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
-  -v qwen3_asr_stt_torch_compile_cache:/app/.cache/torchinductor \
-  -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
+  -v qwen3_asr_stt_data:/app/persistent \
   hangrylabs/qwen3-asr-stt:latest
 ```
 
@@ -57,23 +55,19 @@ curl http://localhost:8000/health
 
 The full `latest` image includes `Qwen/Qwen3-ASR-0.6B-hf`, `Qwen/Qwen3-ASR-1.7B-hf`, and `Qwen/Qwen3-ForcedAligner-0.6B-hf`. Runtime defaults use the built-in vLLM Qwen3-ASR implementation with the 0.6B model, bf16 GPU weights, bounded generation, CUDA graphs, and offline Hugging Face/Transformers flags.
 
-No model volume or network access is required after pulling the full image. A persistent Hugging Face cache volume is optional and should be seeded from the baked image before it is mounted in an offline deployment.
+No network access is required after pulling the full image. A fresh named volume is automatically initialized with its baked model assets the first time Docker mounts it.
 
 ## Tiny Image
 
-The tiny image keeps runtime dependencies but does not bake model assets. Use it when you want a smaller image and a persistent Hugging Face cache volume that warms on first online use:
+The tiny image keeps runtime dependencies but does not bake model assets. Use it when you want a smaller image and a unified persistent product volume that warms on first online use:
 
 ```bash
-docker volume create qwen3_asr_stt_hf_cache
-docker volume create qwen3_asr_stt_torch_compile_cache
-docker volume create qwen3_asr_stt_vllm_cache
+docker volume create qwen3_asr_stt_data
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HF_HUB_OFFLINE=0 \
   -e TRANSFORMERS_OFFLINE=0 \
-  -v qwen3_asr_stt_hf_cache:/app/.cache/huggingface \
-  -v qwen3_asr_stt_torch_compile_cache:/app/.cache/torchinductor \
-  -v qwen3_asr_stt_vllm_cache:/app/.cache/vllm \
+  -v qwen3_asr_stt_data:/app/persistent \
   hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
@@ -95,9 +89,9 @@ The interface provides four focused views:
 - **Transcribe:** upload or record audio inside a replaceable waveform editor with playback, seeking, volume, speed, trimming, and download controls; load bundled multilingual examples without changing the selected language; choose the response format and inspect the raw response.
 - **Stream:** transcribe the microphone incrementally, finalize or reset a session, choose an input device, and use inline explanations for chunk and transcript-stability settings.
 - **API:** inspect health, model, language, and inference status from the same service.
-- **System:** inspect readiness plus one-second GPU history for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Charts support timestamped hover inspection and switchable one- or ten-minute windows; recent history survives a browser reload.
+- **System:** inspect readiness plus one-second GPU history for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Charts support timestamped hover inspection and switchable one- or ten-minute windows; recent history survives a browser reload. The forced aligner can be loaded, released, or configured to remain loaded across restarts, and realtime defaults can be saved for future UI and API sessions.
 
-The branded header reports the active model, inference readiness, and UI build version. It can collapse into a compact persistent toolbar to leave more room for transcription work. Word and segment timestamp controls check forced-aligner availability immediately; the aligner remains disabled by default and the UI explains how to enable it when timestamps are requested.
+The branded header reports the active model, inference readiness, and UI build version. It can collapse into a compact persistent toolbar to leave more room for transcription work. Selecting Word or Segment timestamps loads the forced aligner on demand and keeps it resident for the current container session. The System tab can release that VRAM or persist an always-loaded preference in the mounted settings volume.
 
 <p>
   <img src="assets/ui.webp" alt="Qwen3-ASR-STT browser UI">
@@ -164,6 +158,10 @@ print(result.text)
 - `GET /health/live`
 - `GET /health/ready`
 - `GET /metrics/inference`
+- `GET /system/aligner`
+- `PUT /system/aligner`
+- `POST /system/aligner/load`
+- `POST /system/aligner/unload`
 - `GET /v1/models`
 - `GET /v1/models/{model}`
 - `POST /v1/audio/transcriptions`
@@ -195,11 +193,13 @@ Optional forced aligner asset:
 Qwen/Qwen3-ForcedAligner-0.6B-hf
 ```
 
-The forced aligner is disabled by default so it does not occupy VRAM. Enable it when timestamp output is needed:
+The forced aligner is not loaded by default. Its first compiled load increased observed VRAM use by approximately 3.3 GiB on an RTX 5070 Ti; releasing it immediately returned about 1.8 GiB, while CUDA/compiler context remained cached until restart. Exact behavior varies by GPU, driver, and runtime settings. Selecting Word or Segment in the browser—or requesting `timestamp_granularities` through the API—loads it on demand. The browser forces `verbose_json` while timestamps are selected and schedules the aligner for release after both options remain unchecked for 60 seconds. The System tab can release it immediately or keep it loaded persistently. To make startup loading the initial default when no saved preference exists, use:
 
 ```bash
 -e QWEN_ASR_ENABLE_ALIGNER=1
 ```
+
+The single Qwen aligner supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. It is not a separate model per language; ASR languages outside that list, including Turkish, remain transcribable but cannot produce Qwen forced-alignment timestamps. Japanese alignment includes the required `nagisa` tokenizer. Korean transcription remains supported, but Korean word/segment alignment is not packaged to avoid adding its GPLv3-only optional tokenizer to the Apache-2.0 image; unsupported or unavailable forced-language requests return an actionable HTTP 422 before loading the aligner.
 
 ## Runtime Settings
 
@@ -211,7 +211,9 @@ Common environment variables:
 | --- | --- | --- |
 | `QWEN_ASR_MODEL` | `Qwen/Qwen3-ASR-0.6B-hf` | ASR model ID |
 | `QWEN_ASR_BACKEND` | `vllm` | Inference backend; `transformers` is a diagnostic fallback |
-| `QWEN_ASR_ENABLE_ALIGNER` | `0` | Load forced aligner for timestamp output |
+| `QWEN_ASR_ENABLE_ALIGNER` | `0` | Initial always-load default when no saved System preference exists |
+| `QWEN_ASR_SETTINGS_PATH` | `/app/persistent/app/settings.json` | Persistent UI/runtime settings file |
+| `QWEN_ASR_ALIGNER_LOAD_TIMEOUT_SECONDS` | `600` | Deadline for an on-demand aligner download/load/warmup |
 | `QWEN_ASR_CONCURRENCY` | `2` | Maximum admitted inference requests (one active engine call plus queue) |
 | `QWEN_ASR_MAX_INFERENCE_BATCH_SIZE` | `2` | ASR inference batch cap |
 | `QWEN_ASR_MAX_NEW_TOKENS` | `512` | Max generated tokens |
@@ -239,6 +241,21 @@ Common environment variables:
 | `QWEN_ASR_SSL_CERTFILE` | unset | HTTPS certificate file path inside the container |
 | `QWEN_ASR_SSL_KEYFILE` | unset | HTTPS private key file path inside the container |
 
+The System tab writes the safe operator-controlled values to `/app/persistent/app/settings.json`:
+
+```json
+{
+  "load_aligner_always": false,
+  "realtime_defaults": {
+    "chunk_size_sec": 2.0,
+    "unfixed_chunk_num": 2,
+    "unfixed_token_num": 5
+  }
+}
+```
+
+You may edit this file while the container is stopped. Model selection, backend, GPU allocation, compilation, and health-policy settings remain environment variables because changing them requires a controlled process restart.
+
 Inference is serialized through one owner because the offline vLLM API is synchronous. A timeout or fatal model error changes readiness to HTTP 503 and terminates the process after logging diagnostics. Keep `--restart unless-stopped`, or equivalent orchestrator supervision, enabled so the model is reloaded automatically. `/health/live` remains a cheap HTTP liveness check; `/health/ready` and `/health` report inference admission state.
 
 For the 1.7B model, increase the memory/context profile:
@@ -256,18 +273,23 @@ Decoding temperature is intentionally fixed at `0` for deterministic transcripti
 
 ### Cache Behavior
 
-Persistent Hugging Face cache volumes avoid repeated model downloads with the tiny image. The vLLM cache volume reuses hardware-specific AOT graphs, TorchInductor output, and FlashInfer JIT kernels across container recreations; the separate TorchInductor volume serves the optional aligner and Transformers fallback. These caches do not preserve loaded GPU weights or live CUDA graph state, and startup profiling/warmup still runs. The full image already contains every supported model asset.
+The single `qwen3_asr_stt_data` volume stores downloaded/baked model assets, vLLM and TorchInductor compiler caches, and operator settings under `/app/persistent`. Reuse the same named volume with later image tags to preserve continuity. It does not preserve loaded GPU weights or live CUDA graph state, so startup profiling and warmup still run. Docker initializes a new named volume from the full image's baked `/app/persistent` contents automatically; the tiny image downloads into the same layout on first online use.
 
-The full baked image is the offline source of truth for ASR model assets. If a persistent Hugging Face cache volume is used with the full image, seed it from the baked image instead of downloading from Hugging Face:
+If you used the legacy cache/settings volumes, run this once before retiring them to carry their contents into the unified layout without downloading the models again:
 
 ```bash
-docker volume create qwen3_asr_stt_hf_cache
-docker run --rm \
-  --entrypoint sh \
-  -v qwen3_asr_stt_hf_cache:/hf-cache \
-  hangrylabs/qwen3-asr-stt:latest \
-  -c "test -d /app/.cache/huggingface/hub && mkdir -p /hf-cache && cp -an /app/.cache/huggingface/. /hf-cache/"
+docker volume create qwen3_asr_stt_data
+docker run --rm --entrypoint sh \
+  -v qwen3_asr_stt_hf_cache:/legacy/huggingface:ro \
+  -v qwen3_asr_stt_torch_compile_cache:/legacy/torchinductor:ro \
+  -v qwen3_asr_stt_vllm_cache:/legacy/vllm:ro \
+  -v qwen3_asr_stt_settings:/legacy/settings:ro \
+  -v qwen3_asr_stt_data:/app/persistent \
+  hangrylabs/qwen3-asr-stt:latest_tiny \
+  -c 'mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app && cp -an /legacy/huggingface/. /app/persistent/models/huggingface/ && cp -an /legacy/torchinductor/. /app/persistent/cache/torchinductor/ && cp -an /legacy/vllm/. /app/persistent/cache/vllm/ && cp -an /legacy/settings/. /app/persistent/app/'
 ```
+
+The old volumes are left untouched. Remove them only after confirming the new container is healthy.
 
 To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
 
@@ -363,24 +385,28 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ### v0.3.0 (in development)
 
+- Added persistent and on-demand forced-aligner lifecycle management. Word or Segment selection can load the aligner without restarting, while the System tab can release its VRAM or keep it loaded across container replacements through the unified product data volume. Segment output is now divided into punctuation-, silence-, and duration-aware cues instead of one whole-file block.
+- Added Japanese word/segment alignment support to the image, capability-aware timestamp language validation, automatic idle aligner release, forced `verbose_json` timestamp output, actionable language-tokenizer errors, persistent realtime defaults, and one unified data volume for model assets, compiler caches, and application settings across releases.
 - Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Consolidated artwork under `assets/`, converted shipped web artwork to WebP, and reduced the vendored Lucide font to the glyphs used by the workspace.
 - Refined microphone workflows with automatic example loading, single-button record/stop controls for both recorded and realtime audio, responsive recording waveforms, aligned device refresh controls, and clearer recording status placement.
 - Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration.
 - Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
+- Planned before release: Review and reorganize the implementation, remove code and dependencies that no longer serve the Docker UI/API product, and improve internal boundaries while preserving behavior.
 
 Development images use the rolling tags published from `main`:
 
 **Standard image**
 
 ```bash
-docker run --name qwen3-asr-stt-v0-3-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:latest
+docker volume create qwen3_asr_stt_data
+docker run --name qwen3-asr-stt-v0-3-0 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
 
 **Tiny image**
 
 ```bash
-docker volume create qwen3_asr_stt_v0_3_0_hf_cache
-docker run --name qwen3-asr-stt-v0-3-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_3_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:latest_tiny
+docker volume create qwen3_asr_stt_data
+docker run --name qwen3-asr-stt-v0-3-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
 ### v0.2.0

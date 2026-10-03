@@ -1,8 +1,16 @@
 # Third-Party Notices
 
-This project includes third-party software in the standalone browser UI. The
+This project includes third-party software in its runtime and standalone browser UI. The
 components remain under their respective licenses; inclusion in this
 Apache-2.0-licensed project does not relicense them.
+
+## nagisa and DyNet38
+
+- Project: [nagisa](https://github.com/taishi-i/nagisa)
+- Included package: `nagisa==0.3.0`, used to tokenize Japanese transcripts for forced alignment
+- License: MIT License
+- Runtime dependency: `DyNet38==2.2`
+- DyNet license: Apache License 2.0
 
 ## Lucide
 

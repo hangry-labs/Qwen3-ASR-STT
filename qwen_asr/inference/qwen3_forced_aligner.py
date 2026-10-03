@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
 import torch
-from transformers import AutoModelForTokenClassification, AutoProcessor
+from transformers.models.qwen3_asr.configuration_qwen3_asr import Qwen3ASRConfig
+from transformers.models.qwen3_asr.modeling_qwen3_asr import Qwen3ASRForTokenClassification
+from transformers.models.qwen3_asr.processing_qwen3_asr import Qwen3ASRProcessor
 
 from .compile_utils import compile_model_forward
 from .utils import AudioLike, ensure_list, normalize_audios
@@ -58,8 +60,33 @@ class Qwen3ForcedAligner:
         torch_compile_dynamic: bool | None = None,
         **kwargs: Any,
     ) -> "Qwen3ForcedAligner":
-        model = AutoModelForTokenClassification.from_pretrained(
+        # vLLM registers its generation-oriented Qwen3ASRConfig under the same
+        # AutoConfig model type as Transformers. Once a vLLM ASR engine has
+        # started, the Auto* classes can therefore resolve an aligner checkpoint
+        # to vLLM's config, which has thinker_config instead of audio_config.
+        # Pin the native Transformers classes explicitly so lazy aligner loading
+        # remains independent of vLLM's process-wide registry changes.
+        config = kwargs.pop("config", None)
+        hub_keys = {
+            "cache_dir",
+            "force_download",
+            "local_files_only",
+            "proxies",
+            "revision",
+            "subfolder",
+            "token",
+            "trust_remote_code",
+        }
+        hub_kwargs = {key: value for key, value in kwargs.items() if key in hub_keys}
+        if config is None:
+            config = Qwen3ASRConfig.from_pretrained(
+                pretrained_model_name_or_path,
+                **hub_kwargs,
+            )
+
+        model = Qwen3ASRForTokenClassification.from_pretrained(
             pretrained_model_name_or_path,
+            config=config,
             **kwargs,
         )
         model.eval()
@@ -72,9 +99,10 @@ class Qwen3ForcedAligner:
             dynamic=torch_compile_dynamic,
             label="forced aligner",
         )
-        processor = AutoProcessor.from_pretrained(
+        processor = Qwen3ASRProcessor.from_pretrained(
             pretrained_model_name_or_path,
             fix_mistral_regex=True,
+            **hub_kwargs,
         )
         return cls(
             model=model,

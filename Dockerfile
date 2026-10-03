@@ -4,9 +4,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_ROOT_USER_ACTION=ignore \
-    HF_HOME=/app/.cache/huggingface \
-    TORCHINDUCTOR_CACHE_DIR=/app/.cache/torchinductor \
-    VLLM_CACHE_ROOT=/app/.cache/vllm \
+    HF_HOME=/app/persistent/models/huggingface \
+    TORCHINDUCTOR_CACHE_DIR=/app/persistent/cache/torchinductor \
+    VLLM_CACHE_ROOT=/app/persistent/cache/vllm \
     CUDA_HOME=/usr/local/lib/python3.13/site-packages/nvidia/cu13
 
 WORKDIR /app
@@ -44,7 +44,7 @@ ENV QWEN_ASR_PREFETCH_MODELS=${QWEN_ASR_PREFETCH_MODELS} \
     QWEN_ASR_REQUIRED_MODELS=${QWEN_ASR_REQUIRED_MODELS}
 
 RUN python -u -m qwen_asr.prefetch_assets \
-    && python -c "import os, pathlib, sys; root=pathlib.Path(os.getenv('HF_HOME','/app/.cache/huggingface'))/'hub'; required=[model.strip() for model in os.getenv('QWEN_ASR_REQUIRED_MODELS','').replace(';', ',').split(',') if model.strip()]; missing=[model for model in required if not any((root / ('models--' + model.replace('/', '--')) / 'snapshots').glob('*'))]; print('Validated baked ASR model assets:', ', '.join(required) if required else '(none)'); print('Missing baked ASR model assets:', ', '.join(missing), file=sys.stderr) if missing else None; sys.exit(1 if missing else 0)"
+    && python -c "import os, pathlib, sys; root=pathlib.Path(os.getenv('HF_HOME','/app/persistent/models/huggingface'))/'hub'; required=[model.strip() for model in os.getenv('QWEN_ASR_REQUIRED_MODELS','').replace(';', ',').split(',') if model.strip()]; missing=[model for model in required if not any((root / ('models--' + model.replace('/', '--')) / 'snapshots').glob('*'))]; print('Validated baked ASR model assets:', ', '.join(required) if required else '(none)'); print('Missing baked ASR model assets:', ', '.join(missing), file=sys.stderr) if missing else None; sys.exit(1 if missing else 0)"
 
 FROM python:3.13-slim AS runtime-base
 
@@ -52,10 +52,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_ROOT_USER_ACTION=ignore \
-    HF_HOME=/app/.cache/huggingface \
-    TORCHINDUCTOR_CACHE_DIR=/app/.cache/torchinductor \
-    VLLM_CACHE_ROOT=/app/.cache/vllm \
-    FLASHINFER_WORKSPACE_BASE=/app/.cache/vllm \
+    HF_HOME=/app/persistent/models/huggingface \
+    TORCHINDUCTOR_CACHE_DIR=/app/persistent/cache/torchinductor \
+    VLLM_CACHE_ROOT=/app/persistent/cache/vllm \
+    FLASHINFER_WORKSPACE_BASE=/app/persistent/cache/vllm \
+    QWEN_ASR_SETTINGS_PATH=/app/persistent/app/settings.json \
     CUDA_HOME=/usr/local/lib/python3.13/site-packages/nvidia/cu13 \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
@@ -99,6 +100,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ffmpeg libsndfile1 \
+    && mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8000

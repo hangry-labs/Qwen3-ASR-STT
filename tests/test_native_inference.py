@@ -87,6 +87,59 @@ class _AlignerModel:
 
 
 class NativeInferenceTests(unittest.TestCase):
+    def test_aligner_loader_uses_native_qwen_classes_after_vllm_registration(self):
+        config = object()
+        model = Mock(
+            device=torch.device("cpu"),
+            config=SimpleNamespace(timestamp_token_id=42),
+        )
+        processor = object()
+
+        with (
+            patch(
+                "qwen_asr.inference.qwen3_forced_aligner.Qwen3ASRConfig.from_pretrained",
+                return_value=config,
+            ) as load_config,
+            patch(
+                "qwen_asr.inference.qwen3_forced_aligner.Qwen3ASRForTokenClassification.from_pretrained",
+                return_value=model,
+            ) as load_model,
+            patch(
+                "qwen_asr.inference.qwen3_forced_aligner.Qwen3ASRProcessor.from_pretrained",
+                return_value=processor,
+            ) as load_processor,
+            patch(
+                "qwen_asr.inference.qwen3_forced_aligner.compile_model_forward",
+                return_value=False,
+            ),
+        ):
+            aligner = Qwen3ForcedAligner.from_pretrained(
+                "Qwen/test-aligner",
+                dtype="bfloat16",
+                device_map="cuda:0",
+                revision="test-revision",
+            )
+
+        load_config.assert_called_once_with(
+            "Qwen/test-aligner",
+            revision="test-revision",
+        )
+        load_model.assert_called_once_with(
+            "Qwen/test-aligner",
+            config=config,
+            dtype="bfloat16",
+            device_map="cuda:0",
+            revision="test-revision",
+        )
+        load_processor.assert_called_once_with(
+            "Qwen/test-aligner",
+            fix_mistral_regex=True,
+            revision="test-revision",
+        )
+        model.eval.assert_called_once_with()
+        self.assertIs(aligner.model, model)
+        self.assertIs(aligner.processor, processor)
+
     def test_compile_model_forward_uses_requested_native_profile(self):
         model = SimpleNamespace(forward=Mock(name="forward"))
         compiled_forward = Mock(name="compiled_forward")

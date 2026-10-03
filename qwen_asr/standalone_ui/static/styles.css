@@ -120,6 +120,7 @@ input, select, textarea { width: 100%; border: 1px solid var(--line); border-rad
 input, select { min-height: 40px; padding: 0 10px; }
 textarea { min-height: 112px; padding: 10px; resize: vertical; line-height: 1.45; }
 input:focus, select:focus, textarea:focus { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(114, 167, 255, 0.16); }
+select option:disabled { color: #686b73; background: #15161a; }
 input[readonly] { color: #c7c9cf; cursor: default; }
 .status-line { margin-top: 24px; padding: 10px 11px; border-left: 3px solid var(--line); background: var(--surface); color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
 .status-line[data-tone="success"] { border-color: var(--green); color: #bcebd2; }
@@ -132,6 +133,7 @@ input[readonly] { color: #c7c9cf; cursor: default; }
 .timestamp-options input { width: 15px; min-height: 15px; accent-color: var(--accent); }
 .timestamp-options small { padding-left: 10px; border-left: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; white-space: nowrap; }
 .timestamp-options small[data-state="available"] { color: #9ee0bd; }
+.timestamp-options small[data-state="on-demand"] { color: #ffca9f; }
 .timestamp-options small[data-state="unavailable"] { color: #ffab72; }
 .segmented-control { display: inline-grid; grid-template-columns: 1fr 1fr; margin-bottom: 12px; padding: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .segmented-control button { min-width: 110px; height: 34px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 0.8rem; font-weight: 650; }
@@ -220,6 +222,33 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .view-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .view-heading h2 { margin: 0; font-size: 1.15rem; }
 .view-heading p { margin: 5px 0 0; color: var(--muted); font-size: 0.78rem; }
+.aligner-settings-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 0.7fr); gap: 24px; margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+.aligner-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.aligner-settings-heading > div { display: flex; align-items: center; gap: 8px; }
+.aligner-settings-heading i { color: var(--accent); }
+.aligner-settings-copy p { max-width: 720px; margin: 9px 0 8px; color: var(--muted); font-size: 0.76rem; line-height: 1.5; }
+.aligner-model-name { color: #d4d5d9; font-size: 0.7rem; overflow-wrap: anywhere; }
+.aligner-status-badge { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 0.67rem; font-weight: 700; white-space: nowrap; }
+.aligner-status-badge[data-state="loaded"] { border-color: #397b58; color: #a7e6c3; }
+.aligner-status-badge[data-state="loading"], .aligner-status-badge[data-state="unloading"] { border-color: #956038; color: #ffca9f; }
+.aligner-status-badge[data-state="error"] { border-color: #7f3d43; color: #ffc2c6; }
+.aligner-settings-actions { display: grid; align-content: center; gap: 12px; }
+.runtime-settings-card { margin: 14px 0 18px; padding: 16px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+.runtime-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.runtime-settings-heading > div { display: flex; align-items: center; gap: 8px; }
+.runtime-settings-heading i { color: var(--accent); }
+.runtime-settings-card > p { margin: 9px 0 4px; color: var(--muted); font-size: 0.76rem; line-height: 1.5; }
+.switch-field { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.switch-field > span { display: grid; gap: 4px; }
+.switch-field strong { font-size: 0.78rem; }
+.switch-field small { color: var(--muted); font-size: 0.68rem; line-height: 1.35; }
+.switch-field input { appearance: none; position: relative; flex: 0 0 42px; width: 42px; min-height: 23px; height: 23px; padding: 0; border-radius: 999px; background: #30323a; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.switch-field input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: #b8bac1; transition: transform 140ms ease, background 140ms ease; }
+.switch-field input:checked { border-color: #d96518; background: #6e3513; }
+.switch-field input:checked::after { background: var(--accent); transform: translateX(19px); }
+.switch-field input:disabled { opacity: 0.55; cursor: wait; }
+.aligner-action-row { display: flex; justify-content: flex-end; gap: 8px; }
+.aligner-action-row .secondary-button { min-width: 112px; }
 .data-output { min-height: 420px; margin-top: 18px; padding: 16px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; background: #121315; color: #c9cbd1; font-size: 0.76rem; line-height: 1.55; }
 .system-grid { display: grid; grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.2fr); align-items: start; gap: 22px; }
 .system-grid .data-output { min-height: 320px; }
@@ -283,6 +312,7 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .settings-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; border-right: 0; border-bottom: 1px solid var(--line); }
   .settings-panel .section-title, .settings-panel .status-line { grid-column: 1 / -1; }
   .system-grid { grid-template-columns: 1fr; }
+  .aligner-settings-card { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -328,4 +358,6 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .range-grid label:last-child .setting-tooltip::before { right: auto; left: 5px; }
   .output-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .view-heading { align-items: flex-start; }
+  .aligner-action-row { flex-direction: column; }
+  .aligner-action-row .secondary-button { width: 100%; }
 }

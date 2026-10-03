@@ -8,6 +8,7 @@ from qwen_asr.startup_logging import StartupTimer, log_startup
 
 
 DEFAULT_ASR_MODEL = "Qwen/Qwen3-ASR-0.6B-hf"
+DEFAULT_ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
 DEFAULT_CONCURRENCY = "2"
 DEFAULT_MAX_MODEL_LEN = 2048
 DEFAULT_GPU_MEMORY_UTILIZATION = 0.25
@@ -15,6 +16,7 @@ DEFAULT_MAX_INFERENCE_BATCH_SIZE = 2
 DEFAULT_MAX_NEW_TOKENS = 512
 DEFAULT_MAX_NUM_BATCHED_TOKENS = 2048
 DEFAULT_MAX_NUM_SEQS = 2
+DEFAULT_SETTINGS_PATH = "/app/persistent/app/settings.json"
 
 
 def _enabled(value: str | None, default: bool = False) -> bool:
@@ -153,7 +155,8 @@ def main() -> int:
     ssl_verify = _enabled(os.getenv("QWEN_ASR_SSL_VERIFY"), default=True)
     backend = (os.getenv("QWEN_ASR_BACKEND", "vllm") or "vllm").strip().lower()
     asr_model = os.getenv("QWEN_ASR_MODEL", DEFAULT_ASR_MODEL)
-    aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", "")
+    aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", DEFAULT_ALIGNER_MODEL)
+    settings_path = os.getenv("QWEN_ASR_SETTINGS_PATH", DEFAULT_SETTINGS_PATH)
     cuda_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES", "0")
     concurrency = os.getenv("QWEN_ASR_CONCURRENCY", DEFAULT_CONCURRENCY)
     aligner_kwargs = os.getenv("QWEN_ASR_ALIGNER_KWARGS")
@@ -185,9 +188,9 @@ def main() -> int:
 
     run_ui(
         asr_checkpoint=asr_model,
-        aligner_checkpoint=aligner_model
-        if _enabled(os.getenv("QWEN_ASR_ENABLE_ALIGNER"), default=False) and aligner_model
-        else None,
+        aligner_checkpoint=aligner_model or None,
+        load_aligner_at_startup=_enabled(os.getenv("QWEN_ASR_ENABLE_ALIGNER"), default=False),
+        settings_path=settings_path,
         backend=backend,
         model_kwargs=model_kwargs,
         aligner_kwargs=resolved_aligner_kwargs,

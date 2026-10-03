@@ -12,6 +12,10 @@ const state = {
   backendReady: false,
   model: 'qwen3-asr',
   timestampsAvailable: null,
+  aligner: null,
+  alignerBusy: false,
+  alignerUnloadTimer: null,
+  responseFormatBeforeTimestamps: null,
   gpuHistory: new Map(),
   gpuStats: [],
   gpuWindowMs: 60 * 1000,
@@ -23,6 +27,7 @@ const state = {
 
 const GPU_HISTORY_RETENTION_MS = 10 * 60 * 1000
 const GPU_POLL_INTERVAL_MS = 1000
+const ALIGNER_IDLE_UNLOAD_MS = 60 * 1000
 const UI_SESSION_KEY = 'qwen-asr-ui-state-v1'
 const GPU_SESSION_KEY = 'qwen-asr-gpu-history-v1'
 const GPU_METRICS = [
@@ -268,6 +273,7 @@ async function loadExamples() {
     option.dataset.name = example.name
     select.append(option)
   })
+  syncTimestampExampleOptions()
 }
 
 $('#example-select').addEventListener('change', async () => {
@@ -296,25 +302,201 @@ function selectedTimestampGranularities() {
   return $$('input[name="timestamp"]:checked').map((input) => input.value)
 }
 
-function updateTimestampAvailability(available) {
-  state.timestampsAvailable = available
-  const support = $('#timestamp-support')
-  support.dataset.state = available ? 'available' : 'unavailable'
-  support.textContent = available ? 'Aligner ready' : 'Aligner disabled'
-  support.title = available
-    ? 'Word and segment timestamps are available.'
-    : 'This deployment was started without the forced aligner. Set QWEN_ASR_ENABLE_ALIGNER=1 when starting the container to enable timestamps.'
+function syncTimestampResponseFormat() {
+  const select = $('#response-format')
+  const timestampsSelected = selectedTimestampGranularities().length > 0
+  if (timestampsSelected) {
+    if (select.value !== 'verbose_json' && state.responseFormatBeforeTimestamps === null) {
+      state.responseFormatBeforeTimestamps = select.value
+    }
+    select.value = 'verbose_json'
+    select.disabled = true
+    select.title = 'Word and Segment timestamps require verbose_json output.'
+    return
+  }
+  select.disabled = false
+  select.title = ''
+  if (state.responseFormatBeforeTimestamps !== null) {
+    select.value = state.responseFormatBeforeTimestamps
+    state.responseFormatBeforeTimestamps = null
+  }
 }
 
-$$('input[name="timestamp"]').forEach((input) => input.addEventListener('change', () => {
-  if (!input.checked || state.timestampsAvailable === true) return
-  input.checked = false
-  showToast(
-    state.timestampsAvailable === false
-      ? 'Timestamps are unavailable because this deployment has the forced aligner disabled. Start with QWEN_ASR_ENABLE_ALIGNER=1 to enable Word and Segment timestamps.'
-      : 'Timestamp support is still being checked. Please try again when inference is ready.',
-  )
+function timestampLanguageOptionIssue(language, aligner = state.aligner) {
+  if (!language || language === 'Auto' || !aligner) return null
+  const supported = Array.isArray(aligner.model_supported_languages) ? aligner.model_supported_languages : []
+  if (supported.length && !supported.includes(language)) {
+    return `${language} transcription is supported, but the Qwen forced aligner does not support ${language} timestamps.`
+  }
+  const unavailable = aligner.unavailable_languages && typeof aligner.unavailable_languages === 'object'
+    ? aligner.unavailable_languages
+    : {}
+  return unavailable[language] || null
+}
+
+function timestampLanguageIssue(aligner = state.aligner) {
+  return timestampLanguageOptionIssue($('#language')?.value, aligner)
+}
+
+function syncTimestampLanguageOptions(aligner = state.aligner) {
+  const select = $('#language')
+  if (!select) return
+  const timestampsSelected = selectedTimestampGranularities().length > 0
+  Array.from(select.options).forEach((option) => {
+    const issue = timestampsSelected ? timestampLanguageOptionIssue(option.value, aligner) : null
+    option.disabled = Boolean(issue)
+    option.title = issue || ''
+  })
+  select.title = timestampsSelected
+    ? 'Languages without forced-alignment support are disabled while timestamps are selected.'
+    : ''
+}
+
+function syncTimestampExampleOptions(aligner = state.aligner) {
+  const select = $('#example-select')
+  if (!select) return
+  const timestampsSelected = selectedTimestampGranularities().length > 0
+  Array.from(select.options).forEach((option) => {
+    const language = option.dataset.language
+    const issue = timestampsSelected && language ? timestampLanguageOptionIssue(language, aligner) : null
+    option.disabled = Boolean(issue)
+    option.title = issue || ''
+  })
+  select.title = timestampsSelected
+    ? 'Examples without forced-alignment support are disabled while timestamps are selected.'
+    : ''
+}
+
+function syncTimestampSelectionUi() {
+  syncTimestampResponseFormat()
+  syncTimestampLanguageOptions()
+  syncTimestampExampleOptions()
+}
+
+function cancelAlignerIdleUnload() {
+  clearTimeout(state.alignerUnloadTimer)
+  state.alignerUnloadTimer = null
+}
+
+async function releaseIdleAligner() {
+  state.alignerUnloadTimer = null
+  if (selectedTimestampGranularities().length || !state.aligner?.loaded || state.aligner?.load_always) return
+  setAlignerBusy(true)
+  try {
+    const aligner = await fetchJson('/system/aligner/unload', { method: 'POST' })
+    updateTimestampAvailability(aligner)
+    showToast('Unused forced aligner released from VRAM.', 'success')
+  } catch (error) {
+    showToast(errorMessage(error))
+    await refreshAlignerSettings().catch(() => {})
+  } finally {
+    setAlignerBusy(false)
+  }
+}
+
+function scheduleAlignerIdleUnload() {
+  cancelAlignerIdleUnload()
+  if (selectedTimestampGranularities().length || !state.aligner?.loaded || state.aligner?.load_always) return
+  state.alignerUnloadTimer = setTimeout(releaseIdleAligner, ALIGNER_IDLE_UNLOAD_MS)
+  updateTimestampAvailability(state.aligner)
+}
+
+function updateTimestampAvailability(aligner) {
+  const configured = aligner?.configured === true
+  const loaded = aligner?.loaded === true
+  const status = aligner?.status || (configured ? 'unloaded' : 'unavailable')
+  const languageIssue = timestampLanguageIssue(aligner)
+  state.aligner = aligner || null
+  state.timestampsAvailable = configured
+  const support = $('#timestamp-support')
+  support.dataset.state = languageIssue ? 'unavailable' : loaded ? 'available' : configured ? 'on-demand' : 'unavailable'
+  support.textContent = languageIssue
+    ? `${$('#language').value} timestamps unavailable`
+    : loaded && state.alignerUnloadTimer
+      ? 'Aligner idle · releases after 60s'
+      : loaded ? 'Aligner ready' : status === 'loading' ? 'Loading aligner…' : configured ? 'Loads on selection' : 'Aligner unavailable'
+  support.title = languageIssue || (loaded
+    ? 'Word and segment timestamps are ready.'
+    : configured
+      ? 'Selecting Word or Segment will load the forced aligner into VRAM for this session.'
+      : 'No forced-aligner model is configured for this deployment.')
+  syncTimestampLanguageOptions(aligner)
+  syncTimestampExampleOptions(aligner)
+  renderAlignerSettings(aligner)
+}
+
+function setAlignerBusy(busy) {
+  state.alignerBusy = busy
+  const languageUnavailable = Boolean(timestampLanguageIssue())
+  $$('input[name="timestamp"]').forEach((input) => { input.disabled = busy || languageUnavailable })
+  $('#aligner-load-always').disabled = busy || state.aligner?.configured !== true
+  $('#aligner-load-now').disabled = busy || state.aligner?.configured !== true || state.aligner?.loaded === true
+  $('#aligner-unload-now').disabled = busy || state.aligner?.loaded !== true || state.aligner?.load_always === true
+}
+
+async function loadAlignerOnDemand() {
+  if (state.aligner?.loaded) return state.aligner
+  setAlignerBusy(true)
+  updateTimestampAvailability({ ...state.aligner, configured: true, loaded: false, status: 'loading' })
+  try {
+    const aligner = await fetchJson('/system/aligner/load', { method: 'POST' })
+    updateTimestampAvailability(aligner)
+    showToast('Forced aligner loaded. Timestamp output is ready.', 'success')
+    return aligner
+  } finally {
+    setAlignerBusy(false)
+  }
+}
+
+$$('input[name="timestamp"]').forEach((input) => input.addEventListener('change', async () => {
+  syncTimestampSelectionUi()
+  if (!input.checked) {
+    scheduleAlignerIdleUnload()
+    return
+  }
+  cancelAlignerIdleUnload()
+  const languageIssue = timestampLanguageIssue()
+  if (languageIssue) {
+    input.checked = false
+    syncTimestampSelectionUi()
+    updateTimestampAvailability(state.aligner)
+    showToast(languageIssue)
+    return
+  }
+  if (state.aligner?.loaded === true) {
+    updateTimestampAvailability(state.aligner)
+    return
+  }
+  if (state.timestampsAvailable !== true) {
+    input.checked = false
+    syncTimestampSelectionUi()
+    showToast(
+      state.timestampsAvailable === false
+        ? 'Timestamp output is unavailable because no forced-aligner model is configured.'
+        : 'Timestamp support is still being checked. Please try again when inference is ready.',
+    )
+    return
+  }
+  try {
+    await loadAlignerOnDemand()
+  } catch (error) {
+    input.checked = false
+    syncTimestampSelectionUi()
+    showToast(errorMessage(error))
+    await refreshAlignerSettings().catch(() => {})
+  }
 }))
+
+$('#language').addEventListener('change', () => {
+  const languageIssue = timestampLanguageIssue()
+  if (languageIssue && selectedTimestampGranularities().length) {
+    $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
+    syncTimestampSelectionUi()
+    scheduleAlignerIdleUnload()
+    showToast(languageIssue)
+  }
+  updateTimestampAvailability(state.aligner)
+})
 
 $('#transcribe-form').addEventListener('submit', async (event) => {
   event.preventDefault()
@@ -446,8 +628,8 @@ $('#realtime-device-refresh').addEventListener('click', async () => {
   }
 })
 
-async function fetchJson(path) {
-  const response = await fetch(path)
+async function fetchJson(path, options) {
+  const response = await fetch(path, options)
   const text = await response.text()
   if (!response.ok) throw new Error(await responseError(new Response(text, { status: response.status })))
   return JSON.parse(text)
@@ -464,12 +646,143 @@ async function refreshApiStatus() {
 
 async function refreshSystem() {
   try {
-    const readiness = await fetchJson('/health/ready')
+    const [readiness, aligner, settings] = await Promise.all([
+      fetchJson('/health/ready'),
+      fetchJson('/system/aligner'),
+      fetchJson('/system/settings'),
+    ])
     $('#readiness-output').textContent = JSON.stringify(readiness, null, 2)
+    updateTimestampAvailability(aligner)
+    applyRealtimeDefaults(settings.realtime_defaults, { includeStream: false })
   } catch (error) {
     showToast(errorMessage(error))
   }
 }
+
+async function loadRuntimeSettings() {
+  const settings = await fetchJson('/system/settings')
+  applyRealtimeDefaults(settings.realtime_defaults)
+}
+
+function applyRealtimeDefaults(defaults, { includeStream = true } = {}) {
+  if (!defaults) return
+  const values = {
+    '#system-chunk-size': defaults.chunk_size_sec,
+    '#system-unfixed-chunks': defaults.unfixed_chunk_num,
+    '#system-unfixed-tokens': defaults.unfixed_token_num,
+  }
+  if (includeStream) {
+    Object.assign(values, {
+      '#chunk-size': defaults.chunk_size_sec,
+      '#unfixed-chunks': defaults.unfixed_chunk_num,
+      '#unfixed-tokens': defaults.unfixed_token_num,
+    })
+  }
+  Object.entries(values).forEach(([selector, value]) => {
+    const input = $(selector)
+    if (input && Number.isFinite(Number(value))) {
+      input.value = String(value)
+      sliderOutput(input)
+    }
+  })
+}
+
+$('#realtime-defaults-save').addEventListener('click', async (event) => {
+  const button = event.currentTarget
+  button.disabled = true
+  try {
+    const settings = await fetchJson('/system/settings/realtime', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chunk_size_sec: Number($('#system-chunk-size').value),
+        unfixed_chunk_num: Number($('#system-unfixed-chunks').value),
+        unfixed_token_num: Number($('#system-unfixed-tokens').value),
+      }),
+    })
+    applyRealtimeDefaults(settings.realtime_defaults)
+    showToast('Realtime defaults saved to persistent storage.', 'success')
+  } catch (error) {
+    showToast(errorMessage(error))
+  } finally {
+    button.disabled = false
+  }
+})
+
+function renderAlignerSettings(aligner) {
+  if (!aligner) return
+  const badge = $('#aligner-status-badge')
+  const labels = {
+    unavailable: 'Unavailable',
+    unloaded: 'Not loaded',
+    loading: 'Loading…',
+    loaded: aligner.load_always ? 'Loaded · persistent' : 'Loaded · on demand',
+    unloading: 'Releasing…',
+    error: 'Load failed',
+  }
+  badge.dataset.state = aligner.status || 'unavailable'
+  badge.textContent = labels[aligner.status] || aligner.status
+  $('#aligner-model-name').textContent = aligner.model || 'No forced-aligner model configured'
+  $('#aligner-load-always').checked = aligner.load_always === true
+  setAlignerBusy(state.alignerBusy)
+}
+
+async function refreshAlignerSettings() {
+  const aligner = await fetchJson('/system/aligner')
+  updateTimestampAvailability(aligner)
+  return aligner
+}
+
+$('#aligner-load-always').addEventListener('change', async (event) => {
+  const enabled = event.currentTarget.checked
+  cancelAlignerIdleUnload()
+  setAlignerBusy(true)
+  try {
+    const aligner = await fetchJson('/system/aligner', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ load_aligner_always: enabled }),
+    })
+    if (!aligner.loaded) {
+      $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
+      syncTimestampResponseFormat()
+    }
+    updateTimestampAvailability(aligner)
+    showToast(enabled ? 'Aligner will remain loaded across restarts.' : 'Persistent aligner loading disabled and VRAM released.', 'success')
+  } catch (error) {
+    event.currentTarget.checked = !enabled
+    showToast(errorMessage(error))
+    await refreshAlignerSettings().catch(() => {})
+  } finally {
+    setAlignerBusy(false)
+  }
+})
+
+$('#aligner-load-now').addEventListener('click', async () => {
+  try {
+    await loadAlignerOnDemand()
+  } catch (error) {
+    showToast(errorMessage(error))
+    await refreshAlignerSettings().catch(() => {})
+  }
+})
+
+$('#aligner-unload-now').addEventListener('click', async () => {
+  cancelAlignerIdleUnload()
+  setAlignerBusy(true)
+  try {
+    const aligner = await fetchJson('/system/aligner/unload', { method: 'POST' })
+    $$('input[name="timestamp"]').forEach((input) => { input.checked = false })
+    syncTimestampResponseFormat()
+    updateTimestampAvailability(aligner)
+    showToast('Forced aligner released from VRAM.', 'success')
+  } catch (error) {
+    showToast(errorMessage(error))
+    await refreshAlignerSettings().catch(() => {})
+  } finally {
+    setAlignerBusy(false)
+  }
+})
 
 function element(tag, className, text) {
   const node = document.createElement(tag)
@@ -745,7 +1058,13 @@ async function pollReadiness() {
     state.backendReady = readiness.status === 'ok'
     state.model = readiness.model || state.model
     $('#model-name').textContent = state.model
-    updateTimestampAvailability(readiness.capabilities?.timestamps === true)
+    updateTimestampAvailability(readiness.capabilities?.forced_aligner || {
+      configured: readiness.capabilities?.timestamps === true,
+      loaded: readiness.capabilities?.timestamps_loaded === true,
+      status: readiness.capabilities?.timestamps_loaded === true
+        ? 'loaded'
+        : readiness.capabilities?.timestamps === true ? 'unloaded' : 'unavailable',
+    })
     badge.dataset.state = state.backendReady ? 'ready' : 'starting'
     badge.querySelector('strong').textContent = state.backendReady ? 'Inference ready' : 'Inference starting'
     model.textContent = readiness.model || 'Qwen3-ASR'
@@ -782,4 +1101,5 @@ restoreSessionState()
 setHeroCollapsed(state.headerCollapsed, false, false)
 activateTab(state.activeTab)
 loadExamples().catch(() => {})
+loadRuntimeSettings().catch(() => {})
 pollReadiness()

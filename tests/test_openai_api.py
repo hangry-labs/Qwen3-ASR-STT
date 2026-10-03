@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import io
 import os
+import tempfile
 import threading
 import time
 import unittest
 from dataclasses import dataclass
 from typing import Any
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 from fastapi.testclient import TestClient
 
-from qwen_asr.server.openai_api import create_app
+from qwen_asr.server.openai_api import _segments_payload, create_app
+from qwen_asr.server.aligner_runtime import RuntimeSettingsStore
 
 
 @dataclass
@@ -89,6 +92,49 @@ class FakeASR:
         return state
 
 
+class FakeAlignerRuntime:
+    def __init__(self, asr: FakeASR, settings: RuntimeSettingsStore | None = None):
+        self.asr = asr
+        self.settings = settings
+        self.load_always = False
+        self.load_calls = 0
+        self.unload_calls = 0
+
+    def snapshot(self):
+        loaded = self.asr.forced_aligner is not None
+        return {
+            "configured": True,
+            "loaded": loaded,
+            "status": "loaded" if loaded else "unloaded",
+            "load_always": self.load_always,
+            "model": "Qwen/test-aligner",
+            "last_error": None,
+            "model_supported_languages": [
+                "Chinese", "English", "Cantonese", "French", "German", "Italian",
+                "Japanese", "Korean", "Portuguese", "Russian", "Spanish",
+            ],
+            "available_languages": [
+                "Chinese", "English", "Cantonese", "French", "German", "Italian",
+                "Japanese", "Portuguese", "Russian", "Spanish",
+            ],
+            "unavailable_languages": {
+                "Korean": "Korean timestamps require the optional soynlp tokenizer, which is not bundled in this image."
+            },
+        }
+
+    def load(self, *, warm_up=True):
+        self.load_calls += 1
+        self.asr.forced_aligner = object()
+        return self.snapshot()
+
+    def unload(self):
+        self.unload_calls += 1
+        self.asr.forced_aligner = None
+        return self.snapshot()
+
+    def set_load_always(self, enabled):
+        self.load_always = enabled
+
 class BlockingASR(FakeASR):
     def __init__(self, delay: float):
         super().__init__()
@@ -97,6 +143,16 @@ class BlockingASR(FakeASR):
     def transcribe(self, **kwargs):
         time.sleep(self.delay)
         return super().transcribe(**kwargs)
+
+
+class MissingAlignmentTokenizerASR(FakeASR):
+    def transcribe(self, **kwargs):
+        raise ImportError("Korean forced alignment requires the soynlp tokenizer")
+
+
+class UnsupportedAlignmentLanguageASR(FakeASR):
+    def transcribe(self, **kwargs):
+        raise ValueError("Language 'Turkish' is not supported by the forced aligner")
 
 
 class TrackingASR(FakeASR):
@@ -164,6 +220,17 @@ def _client(asr: FakeASR | None = None) -> TestClient:
             asr=asr or FakeASR(),
             model_name="Qwen/Qwen3-ASR-0.6B-hf",
             concurrency=1,
+        )
+    )
+
+
+def _managed_client(asr: FakeASR, aligner: FakeAlignerRuntime) -> TestClient:
+    return TestClient(
+        create_app(
+            asr=asr,
+            model_name="Qwen/Qwen3-ASR-0.6B-hf",
+            concurrency=1,
+            aligner_runtime=aligner,
         )
     )
 
@@ -267,6 +334,166 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertEqual(payload["words"][0]["word"], "hello")
         self.assertEqual(payload["segments"][0]["text"], "hello world")
 
+    def test_timestamp_request_loads_configured_aligner_on_demand(self):
+        asr = FakeASR()
+        aligner = FakeAlignerRuntime(asr)
+        response = _managed_client(asr, aligner).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={
+                "model": "qwen3-asr",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(aligner.load_calls, 1)
+        self.assertTrue(response.json()["words"])
+
+    def test_unsupported_forced_timestamp_language_is_rejected_before_aligner_load(self):
+        asr = FakeASR()
+        aligner = FakeAlignerRuntime(asr)
+        response = _managed_client(asr, aligner).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={
+                "model": "qwen3-asr",
+                "language": "Turkish",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("does not support Turkish timestamps", response.json()["error"]["message"])
+        self.assertEqual(aligner.load_calls, 0)
+
+    def test_missing_packaged_timestamp_language_dependency_is_rejected_before_aligner_load(self):
+        asr = FakeASR()
+        aligner = FakeAlignerRuntime(asr)
+        response = _managed_client(asr, aligner).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={
+                "model": "qwen3-asr",
+                "language": "Korean",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("soynlp tokenizer", response.json()["error"]["message"])
+        self.assertEqual(aligner.load_calls, 0)
+
+    def test_missing_language_tokenizer_returns_actionable_error(self):
+        asr = MissingAlignmentTokenizerASR(forced_aligner=object())
+        response = _client(asr).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={
+                "model": "qwen3-asr",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        message = response.json()["error"]["message"]
+        self.assertIn("soynlp tokenizer is not bundled", message)
+        self.assertIn("without timestamps remains available", message)
+
+    def test_auto_detected_unsupported_timestamp_language_returns_422(self):
+        asr = UnsupportedAlignmentLanguageASR(forced_aligner=object())
+        response = _client(asr).post(
+            "/v1/audio/transcriptions",
+            files=_files(),
+            data={
+                "model": "qwen3-asr",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("not supported by the forced aligner", response.json()["error"]["message"])
+
+    def test_aligner_system_setting_loads_persists_and_unloads(self):
+        asr = FakeASR()
+        aligner = FakeAlignerRuntime(asr)
+        client = _managed_client(asr, aligner)
+
+        enabled = client.put("/system/aligner", json={"load_aligner_always": True})
+        self.assertEqual(enabled.status_code, 200)
+        self.assertTrue(enabled.json()["loaded"])
+        self.assertTrue(enabled.json()["load_always"])
+
+        blocked = client.post("/system/aligner/unload")
+        self.assertEqual(blocked.status_code, 409)
+
+        disabled = client.put("/system/aligner", json={"load_aligner_always": False})
+        self.assertEqual(disabled.status_code, 200)
+        self.assertFalse(disabled.json()["loaded"])
+        self.assertFalse(disabled.json()["load_always"])
+
+    def test_realtime_defaults_can_be_persisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            asr = FakeASR()
+            settings = RuntimeSettingsStore(Path(directory) / "settings.json")
+            client = _managed_client(asr, FakeAlignerRuntime(asr, settings))
+
+            saved = client.put(
+                "/system/settings/realtime",
+                json={"chunk_size_sec": 1.25, "unfixed_chunk_num": 3, "unfixed_token_num": 8},
+            )
+
+            self.assertEqual(saved.status_code, 200)
+            self.assertEqual(client.get("/system/settings").json()["realtime_defaults"], saved.json()["realtime_defaults"])
+
+    def test_segment_timestamps_split_on_punctuation_and_silence(self):
+        result = FakeResult(
+            text="Hello world. Another thought after a pause",
+            time_stamps=FakeAlign(
+                [
+                    FakeSpan("Hello", 0.0, 0.3),
+                    FakeSpan("world.", 0.31, 0.7),
+                    FakeSpan("Another", 0.75, 1.1),
+                    FakeSpan("thought", 1.12, 1.5),
+                    FakeSpan("after", 2.4, 2.7),
+                    FakeSpan("a", 2.72, 2.8),
+                    FakeSpan("pause", 2.82, 3.2),
+                ]
+            ),
+        )
+
+        segments = _segments_payload(result)
+
+        self.assertEqual([segment["text"] for segment in segments], ["Hello world.", "Another thought", "after a pause"])
+        self.assertEqual([segment["id"] for segment in segments], [0, 1, 2])
+
+    def test_segment_timestamps_project_transcript_punctuation_onto_aligner_words(self):
+        result = FakeResult(
+            text='I made tea. Then the kettle said "hello!"',
+            time_stamps=FakeAlign(
+                [
+                    FakeSpan("I", 0.0, 0.1),
+                    FakeSpan("made", 0.12, 0.3),
+                    FakeSpan("tea", 0.31, 0.5),
+                    FakeSpan("Then", 0.55, 0.75),
+                    FakeSpan("the", 0.76, 0.9),
+                    FakeSpan("kettle", 0.91, 1.2),
+                    FakeSpan("said", 1.21, 1.4),
+                    FakeSpan("hello", 1.41, 1.7),
+                ]
+            ),
+        )
+
+        segments = _segments_payload(result)
+
+        self.assertEqual([segment["text"] for segment in segments], ["I made tea.", "Then the kettle said hello!"])
+        self.assertEqual([segment["start"] for segment in segments], [0.0, 0.55])
+
     def test_stream_true_returns_transcript_events(self):
         with _client().stream(
             "POST",
@@ -302,6 +529,7 @@ class OpenAIApiTests(unittest.TestCase):
         self.assertFalse(without_aligner.json()["capabilities"]["timestamps"])
         self.assertEqual(without_aligner.json()["capabilities"]["timestamp_granularities"], [])
         self.assertTrue(with_aligner.json()["capabilities"]["timestamps"])
+        self.assertTrue(with_aligner.json()["capabilities"]["timestamps_loaded"])
         self.assertEqual(
             with_aligner.json()["capabilities"]["timestamp_granularities"],
             ["word", "segment"],
