@@ -1,4 +1,4 @@
-name: Build and Push Docker Image (baked)
+name: Build and Push Container Images
 
 on:
   push:
@@ -18,7 +18,7 @@ on:
         required: false
         type: string
       push_latest:
-        description: "Also publish latest"
+        description: "Also publish latest and latest_tiny"
         required: false
         default: true
         type: boolean
@@ -48,7 +48,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: docker-baked-${{ github.ref }}
+  group: docker-images-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -104,24 +104,31 @@ jobs:
             version="${{ inputs.image_tag }}"
           fi
 
-          tags=()
+          baked_tags=()
+          tiny_tags=()
           if [[ "${GITHUB_REF}" == refs/heads/main && "${{ github.event_name }}" != "workflow_dispatch" ]]; then
-            tags+=("${IMAGE_NAME}:latest" "${GHCR_IMAGE_NAME}:latest")
+            baked_tags+=("${IMAGE_NAME}:latest" "${GHCR_IMAGE_NAME}:latest")
+            tiny_tags+=("${IMAGE_NAME}:latest_tiny" "${GHCR_IMAGE_NAME}:latest_tiny")
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.push_latest }}" == "true" ]]; then
-            tags+=("${IMAGE_NAME}:latest" "${GHCR_IMAGE_NAME}:latest")
+            baked_tags+=("${IMAGE_NAME}:latest" "${GHCR_IMAGE_NAME}:latest")
+            tiny_tags+=("${IMAGE_NAME}:latest_tiny" "${GHCR_IMAGE_NAME}:latest_tiny")
           fi
           if [[ -n "${version}" ]]; then
-            tags+=("${IMAGE_NAME}:${version}" "${GHCR_IMAGE_NAME}:${version}")
+            baked_tags+=("${IMAGE_NAME}:${version}" "${GHCR_IMAGE_NAME}:${version}")
+            tiny_tags+=("${IMAGE_NAME}:${version}_tiny" "${GHCR_IMAGE_NAME}:${version}_tiny")
           fi
 
-          if [[ "${#tags[@]}" -eq 0 ]]; then
+          if [[ "${#baked_tags[@]}" -eq 0 || "${#tiny_tags[@]}" -eq 0 ]]; then
             echo "No tags selected for publishing." >&2
             exit 1
           fi
 
           {
-            echo "tags<<EOF"
-            printf '%s\n' "${tags[@]}"
+            echo "baked_tags<<EOF"
+            printf '%s\n' "${baked_tags[@]}"
+            echo "EOF"
+            echo "tiny_tags<<EOF"
+            printf '%s\n' "${tiny_tags[@]}"
             echo "EOF"
             echo "version=${version}"
           } >> "${GITHUB_OUTPUT}"
@@ -132,8 +139,29 @@ jobs:
           context: .
           target: baked
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.baked_tags }}
           build-args: |
             QWEN_ASR_PREFETCH_MODELS=${{ inputs.prefetch_models || env.DEFAULT_PREFETCH_MODELS }}
             QWEN_ASR_PREFETCH_ALLOW_PATTERNS=${{ inputs.prefetch_allow_patterns }}
             QWEN_ASR_PREFETCH_ALIGNER=${{ github.event_name == 'workflow_dispatch' && inputs.prefetch_aligner == false && '0' || '1' }}
+
+      - name: Report disk usage after baked image
+        shell: bash
+        run: |
+          df -h
+          docker buildx du || true
+
+      - name: Build and push tiny Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: tiny
+          push: true
+          tags: ${{ steps.meta.outputs.tiny_tags }}
+
+      - name: Report final disk usage
+        if: always()
+        shell: bash
+        run: |
+          df -h
+          docker buildx du || true

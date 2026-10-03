@@ -41,24 +41,35 @@ def _split_patterns(value: str | None) -> list[str] | None:
     return patterns or None
 
 
-def main() -> None:
+def _requested_asr_model_ids() -> list[str]:
     models = _split_models(os.getenv("QWEN_ASR_PREFETCH_MODELS"))
     if not models:
         models = [os.getenv("QWEN_ASR_MODEL", DEFAULT_ASR_MODEL)]
+    return list(dict.fromkeys(models))
+
+
+def requested_model_ids() -> list[str]:
+    models = _requested_asr_model_ids()
+
+    if _enabled(os.getenv("QWEN_ASR_PREFETCH_ALIGNER"), default=True):
+        models.append(os.getenv("QWEN_ASR_ALIGNER_MODEL", DEFAULT_ALIGNER_MODEL))
+
+    return list(dict.fromkeys(models))
+
+
+def main() -> None:
+    models = _requested_asr_model_ids()
     allow_patterns = _split_patterns(os.getenv("QWEN_ASR_PREFETCH_ALLOW_PATTERNS"))
 
-    seen = set()
     for model in models:
-        if model in seen:
-            continue
-        seen.add(model)
         print(f"Prefetching Qwen3-ASR model asset: {model}")
         snapshot_download(repo_id=model, allow_patterns=allow_patterns)
 
     if _enabled(os.getenv("QWEN_ASR_PREFETCH_ALIGNER"), default=True):
         aligner_model = os.getenv("QWEN_ASR_ALIGNER_MODEL", DEFAULT_ALIGNER_MODEL)
-        print(f"Prefetching Qwen3 forced aligner: {aligner_model}")
-        snapshot_download(repo_id=aligner_model)
+        if aligner_model not in models:
+            print(f"Prefetching Qwen3 forced aligner: {aligner_model}")
+            snapshot_download(repo_id=aligner_model)
 
 
 if __name__ == "__main__":

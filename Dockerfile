@@ -23,6 +23,8 @@ RUN python -m pip install --upgrade pip setuptools wheel \
 RUN ln -sfn lib /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib64 \
     && ln -sfn libcudart.so.13 /usr/local/lib/python3.13/site-packages/nvidia/cu13/lib/libcudart.so
 
+FROM base AS app-builder
+
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md VERSION /app/
 COPY qwen_asr /app/qwen_asr
 COPY assets/qwen3_asr_favicon.webp assets/qwen3_asr_logo_horizontal.webp assets/hangrylabs_logo_horizontal.webp /app/assets/
@@ -30,21 +32,21 @@ COPY testbench /app/testbench
 
 RUN python -m pip install -e . --no-deps
 
-FROM base AS baked-builder
+FROM base AS asset-builder
 
 ARG QWEN_ASR_PREFETCH_MODELS=Qwen/Qwen3-ASR-0.6B-hf,Qwen/Qwen3-ASR-1.7B-hf
 ARG QWEN_ASR_PREFETCH_ALLOW_PATTERNS=
 ARG QWEN_ASR_PREFETCH_ALIGNER=1
 ARG QWEN_ASR_ALIGNER_MODEL=Qwen/Qwen3-ForcedAligner-0.6B-hf
-ARG QWEN_ASR_REQUIRED_MODELS=Qwen/Qwen3-ASR-0.6B-hf,Qwen/Qwen3-ASR-1.7B-hf,Qwen/Qwen3-ForcedAligner-0.6B-hf
 ENV QWEN_ASR_PREFETCH_MODELS=${QWEN_ASR_PREFETCH_MODELS} \
     QWEN_ASR_PREFETCH_ALLOW_PATTERNS=${QWEN_ASR_PREFETCH_ALLOW_PATTERNS} \
     QWEN_ASR_PREFETCH_ALIGNER=${QWEN_ASR_PREFETCH_ALIGNER} \
-    QWEN_ASR_ALIGNER_MODEL=${QWEN_ASR_ALIGNER_MODEL} \
-    QWEN_ASR_REQUIRED_MODELS=${QWEN_ASR_REQUIRED_MODELS}
+    QWEN_ASR_ALIGNER_MODEL=${QWEN_ASR_ALIGNER_MODEL}
+
+COPY qwen_asr/__init__.py qwen_asr/prefetch_assets.py /app/qwen_asr/
 
 RUN python -u -m qwen_asr.prefetch_assets \
-    && python -c "import os, pathlib, sys; root=pathlib.Path(os.getenv('HF_HOME','/app/persistent/models/huggingface'))/'hub'; required=[model.strip() for model in os.getenv('QWEN_ASR_REQUIRED_MODELS','').replace(';', ',').split(',') if model.strip()]; missing=[model for model in required if not any((root / ('models--' + model.replace('/', '--')) / 'snapshots').glob('*'))]; print('Validated baked ASR model assets:', ', '.join(required) if required else '(none)'); print('Missing baked ASR model assets:', ', '.join(missing), file=sys.stderr) if missing else None; sys.exit(1 if missing else 0)"
+    && python -c "import os, pathlib, sys; from qwen_asr.prefetch_assets import requested_model_ids; root=pathlib.Path(os.getenv('HF_HOME','/app/persistent/models/huggingface'))/'hub'; required=requested_model_ids(); missing=[model for model in required if not any((root / ('models--' + model.replace('/', '--')) / 'snapshots').glob('*'))]; print('Validated baked ASR model assets:', ', '.join(required)); print('Missing baked ASR model assets:', ', '.join(missing), file=sys.stderr) if missing else None; sys.exit(1 if missing else 0)"
 
 FROM python:3.13-slim AS runtime-base
 
@@ -116,10 +118,11 @@ FROM runtime-base AS tiny
 ENV HF_HUB_OFFLINE=0 \
     TRANSFORMERS_OFFLINE=0
 
-COPY --from=base /usr/local /usr/local
-COPY --from=base /app /app
+COPY --from=app-builder /usr/local /usr/local
+COPY --from=app-builder /app /app
 
 FROM runtime-base AS baked
 
-COPY --from=baked-builder /usr/local /usr/local
-COPY --from=baked-builder /app /app
+COPY --from=app-builder /usr/local /usr/local
+COPY --from=app-builder /app /app
+COPY --from=asset-builder /app/persistent /app/persistent
