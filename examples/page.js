@@ -1,25 +1,25 @@
-const UI_LOCALES = [
-  { code: 'en', name: 'English' },
-  { code: 'pl', name: 'Polski' },
-  { code: 'ja', name: '日本語' },
-  { code: 'zh', name: '中文' },
-  { code: 'es', name: 'Español' },
-  { code: 'de', name: 'Deutsch' },
-]
-const UI_LOCALE_CODES = new Set(UI_LOCALES.map((locale) => locale.code))
-const LOCALE_STORAGE_KEY = 'qwen-asr-ui-locale-v1'
+const LANGUAGE_OPTIONS = window.QWEN_EXAMPLE_LANGUAGES || []
+const EXAMPLES = window.QWEN_EXAMPLE_CATALOG || []
+const LANGUAGE_BY_CODE = new Map(LANGUAGE_OPTIONS.map((entry) => [entry.code, entry]))
+const LANGUAGE_BY_NAME = new Map(LANGUAGE_OPTIONS.map((entry) => [entry.language, entry]))
+const EXAMPLES_STORAGE_KEY = 'qwen-asr-examples-language-v1'
 const params = new URLSearchParams(window.location.search)
 
-function storedLocale() {
-  try { return localStorage.getItem(LOCALE_STORAGE_KEY) } catch { return null }
+function storedLanguageCode() {
+  try { return localStorage.getItem(EXAMPLES_STORAGE_KEY) } catch { return null }
 }
 
-let currentLocale = UI_LOCALE_CODES.has(params.get('lang'))
-  ? params.get('lang')
-  : UI_LOCALE_CODES.has(storedLocale()) ? storedLocale() : 'en'
-let messages = {}
-let examples = []
-let filterLanguage = params.get('filter') || 'all'
+function initialLanguage() {
+  const queryLocale = LANGUAGE_BY_CODE.get(params.get('lang'))
+  if (queryLocale) return queryLocale
+  const legacyFilter = LANGUAGE_BY_NAME.get(params.get('filter'))
+  if (legacyFilter) return legacyFilter
+  return LANGUAGE_BY_CODE.get(storedLanguageCode()) || LANGUAGE_BY_CODE.get('en') || LANGUAGE_OPTIONS[0]
+}
+
+let activeLanguage = initialLanguage()
+let filterLanguage = params.get('filter') === 'all' ? 'all' : activeLanguage?.language || 'English'
+let messages = activeLanguage?.messages || {}
 let currentVolume = 0.85
 let lastVolume = currentVolume
 
@@ -30,9 +30,8 @@ function t(key, variables = {}, fallback = key) {
   ))
 }
 
-function languageLabel(language) {
-  const key = String(language).toLowerCase().replaceAll(' ', '_')
-  return t(`languages.${key}`, {}, language)
+function nativeLanguageName(language) {
+  return LANGUAGE_BY_NAME.get(language)?.nativeName || language
 }
 
 function replaceQuery(nextParams) {
@@ -40,42 +39,20 @@ function replaceQuery(nextParams) {
   history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
 }
 
-async function fetchJson(relativePath) {
-  const response = await fetch(new URL(relativePath, document.baseURI))
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-  return response.json()
-}
-
-async function loadMessages(locale) {
-  const [english, selected] = await Promise.all([
-    fetchJson('../qwen_asr/standalone_ui/static/locales/en.json'),
-    locale === 'en'
-      ? Promise.resolve({})
-      : fetchJson(`../qwen_asr/standalone_ui/static/locales/${locale}.json`),
-  ])
-  messages = { ...english, ...selected }
-}
-
 function applyTranslations() {
-  document.documentElement.lang = currentLocale
-  document.title = t('examplesPage.title', {}, document.title)
+  document.documentElement.lang = activeLanguage?.code || 'en'
+  document.documentElement.dir = activeLanguage?.direction || 'ltr'
+  document.title = `Hangry Labs ${t('headline', {}, 'Qwen3-ASR-STT language examples')}`
   document.querySelectorAll('[data-i18n]').forEach((element) => {
-    element.textContent = t(element.dataset.i18n, {}, element.textContent)
+    const translated = t(element.dataset.i18n, {}, element.textContent)
+    element.textContent = element.dataset.i18n === 'headline'
+      ? translated.replaceAll('Qwen3-ASR-STT', 'Qwen3‑ASR‑STT')
+      : translated
   })
   document.querySelectorAll('[data-i18n-aria-label]').forEach((element) => {
     element.setAttribute('aria-label', t(element.dataset.i18nAriaLabel, {}, element.getAttribute('aria-label') || ''))
   })
   updateVolumeControl()
-}
-
-function populateLocalePicker() {
-  const picker = document.querySelector('#page-locale')
-  picker.replaceChildren(...UI_LOCALES.map((locale) => {
-    const option = new Option(locale.name, locale.code)
-    option.selected = locale.code === currentLocale
-    return option
-  }))
-  picker.setAttribute('aria-label', t('locale.label'))
 }
 
 function playIcon(playing) {
@@ -112,8 +89,8 @@ function bindPlayer(card) {
   function updatePlayState(playing) {
     card.classList.toggle('is-playing', playing)
     playButton.innerHTML = playIcon(playing)
-    playButton.setAttribute('aria-label', t(playing ? 'examplesPage.pause' : 'examplesPage.play', {
-      language: languageLabel(card.dataset.language),
+    playButton.setAttribute('aria-label', t(playing ? 'pause' : 'play', {
+      language: nativeLanguageName(card.dataset.language),
     }))
   }
 
@@ -173,15 +150,13 @@ function createCard(example) {
   const title = document.createElement('div')
   title.className = 'card-title'
   const heading = document.createElement('h3')
-  heading.textContent = languageLabel(example.language)
-  heading.dataset.cardLanguage = ''
+  heading.textContent = nativeLanguageName(example.language)
   const canonical = document.createElement('p')
   canonical.textContent = example.language
   title.append(heading, canonical)
   const badge = document.createElement('span')
   badge.className = 'sample-badge'
-  badge.dataset.sampleBadge = ''
-  badge.textContent = t('examplesPage.sampleNumber', { number: '01' })
+  badge.textContent = '#01'
   head.append(title, badge)
 
   const reference = document.createElement('div')
@@ -189,9 +164,10 @@ function createCard(example) {
   const referenceLabel = document.createElement('span')
   referenceLabel.className = 'reference-label'
   referenceLabel.dataset.referenceLabel = ''
-  referenceLabel.textContent = t('examplesPage.reference')
+  referenceLabel.textContent = t('reference')
   const transcript = document.createElement('p')
-  transcript.textContent = example.expected_text
+  transcript.textContent = example.expectedText
+  transcript.dir = 'auto'
   reference.append(referenceLabel, transcript)
 
   const player = document.createElement('div')
@@ -205,7 +181,7 @@ function createCard(example) {
   const progressButton = document.createElement('button')
   progressButton.className = 'progress-button'
   progressButton.type = 'button'
-  progressButton.setAttribute('aria-label', t('examplesPage.seek'))
+  progressButton.setAttribute('aria-label', t('seek'))
   progressButton.innerHTML = '<span class="progress-track" aria-hidden="true"><span class="progress-fill"></span><span class="progress-knob"></span></span>'
   const duration = document.createElement('span')
   duration.className = 'duration'
@@ -223,57 +199,61 @@ function createCard(example) {
 
 function renderCards() {
   const grid = document.querySelector('#example-grid')
-  grid.replaceChildren(...examples.map(createCard))
+  grid.replaceChildren(...EXAMPLES.map(createCard))
 }
 
 function renderFilters() {
   const filter = document.querySelector('#language-filter')
-  const languages = examples.map((example) => example.language)
-  if (filterLanguage !== 'all' && !languages.includes(filterLanguage)) filterLanguage = 'all'
-  const choices = ['all', ...languages]
-  filter.replaceChildren(...choices.map((language) => {
+  const choices = [{ language: 'all', nativeName: t('all') }, ...LANGUAGE_OPTIONS]
+  filter.replaceChildren(...choices.map((entry) => {
+    const language = entry.language
     const button = document.createElement('button')
     button.className = `filter-button${language === filterLanguage ? ' is-active' : ''}`
     button.type = 'button'
     button.dataset.language = language
     button.setAttribute('aria-pressed', String(language === filterLanguage))
-    button.textContent = language === 'all' ? t('examplesPage.all') : languageLabel(language)
+    button.textContent = language === 'all' ? t('all') : entry.nativeName
     button.addEventListener('click', () => setFilter(language))
     return button
   }))
 }
 
-function setFilter(language) {
+function updateDynamicTranslations() {
+  document.querySelectorAll('.example-card').forEach((card) => {
+    card.querySelector('[data-reference-label]').textContent = t('reference')
+    card.querySelector('.progress-button').setAttribute('aria-label', t('seek'))
+    const audio = card.querySelector('audio')
+    card.querySelector('.play-button').setAttribute('aria-label', t(
+      audio.paused ? 'play' : 'pause',
+      { language: nativeLanguageName(card.dataset.language) },
+    ))
+  })
+}
+
+function setFilter(language, updateUrl = true) {
   filterLanguage = language
   document.querySelectorAll('.example-card audio').forEach((audio) => audio.pause())
-  document.querySelectorAll('.filter-button').forEach((button) => {
-    const selected = button.dataset.language === language
-    button.classList.toggle('is-active', selected)
-    button.setAttribute('aria-pressed', String(selected))
-  })
+
+  activeLanguage = language === 'all'
+    ? LANGUAGE_BY_CODE.get('en')
+    : LANGUAGE_BY_NAME.get(language) || LANGUAGE_BY_CODE.get('en')
+  messages = activeLanguage.messages
+  try { localStorage.setItem(EXAMPLES_STORAGE_KEY, activeLanguage.code) } catch {}
+
+  applyTranslations()
+  updateDynamicTranslations()
+  renderFilters()
   document.querySelectorAll('.example-card').forEach((card) => {
     card.hidden = language !== 'all' && card.dataset.language !== language
   })
-  const nextParams = new URLSearchParams(window.location.search)
-  if (language === 'all') nextParams.delete('filter')
-  else nextParams.set('filter', language)
-  replaceQuery(nextParams)
-}
 
-function updateDynamicTranslations() {
-  document.querySelectorAll('.example-card').forEach((card) => {
-    card.querySelector('[data-card-language]').textContent = languageLabel(card.dataset.language)
-    card.querySelector('[data-reference-label]').textContent = t('examplesPage.reference')
-    card.querySelector('[data-sample-badge]').textContent = t('examplesPage.sampleNumber', { number: '01' })
-    card.querySelector('.progress-button').setAttribute('aria-label', t('examplesPage.seek'))
-    const audio = card.querySelector('audio')
-    card.querySelector('.play-button').setAttribute('aria-label', t(
-      audio.paused ? 'examplesPage.play' : 'examplesPage.pause',
-      { language: languageLabel(card.dataset.language) },
-    ))
-  })
-  renderFilters()
-  setFilter(filterLanguage)
+  if (updateUrl) {
+    const nextParams = new URLSearchParams(window.location.search)
+    nextParams.set('lang', activeLanguage.code)
+    if (language === 'all') nextParams.set('filter', 'all')
+    else nextParams.delete('filter')
+    replaceQuery(nextParams)
+  }
 }
 
 function updateVolumeControl() {
@@ -287,7 +267,7 @@ function updateVolumeControl() {
   if (slider) slider.value = String(currentVolume)
   if (button) {
     button.dataset.muted = String(muted)
-    button.setAttribute('aria-label', t(muted ? 'examplesPage.unmute' : 'examplesPage.mute'))
+    button.setAttribute('aria-label', t(muted ? 'unmute' : 'mute'))
     button.querySelector('.volume-icon-on').hidden = muted
     button.querySelector('.volume-icon-muted').hidden = !muted
   }
@@ -309,54 +289,19 @@ document.querySelector('.volume-button').addEventListener('click', () => {
   updateVolumeControl()
 })
 
-document.querySelector('#page-locale').addEventListener('change', async (event) => {
-  currentLocale = event.currentTarget.value
-  try { localStorage.setItem(LOCALE_STORAGE_KEY, currentLocale) } catch {}
-  const nextParams = new URLSearchParams(window.location.search)
-  nextParams.set('lang', currentLocale)
-  replaceQuery(nextParams)
-  await loadMessages(currentLocale)
-  applyTranslations()
-  populateLocalePicker()
-  updateDynamicTranslations()
-})
-
-async function initialize() {
+function initialize() {
   const loading = document.querySelector('#loading-state')
-  if (window.location.protocol === 'file:') {
+  if (LANGUAGE_OPTIONS.length !== 30 || EXAMPLES.length !== 30) {
     loading.dataset.state = 'error'
-    loading.textContent = 'Local preview requires a web server. From the repository root, run: python -m http.server 8011 — then open http://localhost:8011/examples/'
+    loading.textContent = 'Examples could not be loaded.'
     delete document.documentElement.dataset.loading
     return
   }
-  try {
-    const [manifest] = await Promise.all([
-      fetchJson('../testbench/manifest.json'),
-      loadMessages(currentLocale),
-    ])
-    const firstByLanguage = new Map()
-    manifest.cases.forEach((example) => {
-      if (example.group.startsWith('random') && !firstByLanguage.has(example.language)) {
-        firstByLanguage.set(example.language, example)
-      }
-    })
-    examples = manifest.supported_languages_with_assets
-      .map(({ language }) => firstByLanguage.get(language))
-      .filter(Boolean)
-    try { localStorage.setItem(LOCALE_STORAGE_KEY, currentLocale) } catch {}
-    applyTranslations()
-    populateLocalePicker()
-    renderCards()
-    renderFilters()
-    setFilter(filterLanguage)
-    loading.hidden = true
-    delete document.documentElement.dataset.loading
-  } catch (error) {
-    console.error(error)
-    loading.dataset.state = 'error'
-    loading.textContent = t('examplesPage.loadFailed', {}, 'Examples could not be loaded. Open this page through the published GitHub Pages site.')
-    delete document.documentElement.dataset.loading
-  }
+  applyTranslations()
+  renderCards()
+  setFilter(filterLanguage, false)
+  loading.hidden = true
+  delete document.documentElement.dataset.loading
 }
 
 initialize()

@@ -92,7 +92,7 @@ Snapshot or development version tags are intentionally not published. Release ta
 
 The primary responsive browser UI runs on port 8000 alongside the OpenAI-compatible API. Its HTML, CSS, JavaScript, icons, and WaveSurfer assets are included locally, so the full image remains usable offline after it is pulled.
 
-The header's **Examples** link opens the public multilingual showcase in the currently selected interface language. It offers one playable repository test recording and reference transcript for each of the 30 supported transcription languages.
+The header's **Examples** link opens the public multilingual showcase in the currently selected interface language. It offers one playable repository test recording and reference transcript for each of the 30 supported transcription languages. Selecting a language filters its recording and automatically localizes the showcase into that language; these broader translations remain self-contained under `examples/` rather than expanding the product UI catalogs.
 
 The interface provides four focused views:
 
@@ -401,7 +401,7 @@ Preview the static examples website from the repository root:
 python -m http.server 8011
 ```
 
-Then open [http://localhost:8011/examples/](http://localhost:8011/examples/). Opening `examples/index.html` directly as a `file://` URL cannot load its JSON manifest and translation catalogs because browsers block those cross-file requests.
+Then open [http://localhost:8011/examples/](http://localhost:8011/examples/). The examples site is self-contained and can also be opened directly through `examples/index.html`; the local server is recommended because it matches GitHub Pages behavior and produces a normal HTTP origin.
 
 Run benchmark model profiles:
 
@@ -473,7 +473,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added GitHub Container Registry as an official image mirror. One workflow publishes identical full and tiny rolling and immutable tags to Docker Hub and GHCR.
 - Unified full and tiny publishing in one Buildx job so both variants reuse the same dependency graph without loading either image into the runner's Docker store. Model prefetch now depends only on its focused downloader code and build arguments, and baked assets occupy an independent final-image layer, allowing unrelated UI/API changes to reuse both the downloads and the large model layer.
 - Added complete browser UI localization for English, Polish, Japanese, Chinese, Spanish, and German. Official locale routes (`/en`, `/pl`, `/ja`, `/zh`, `/es`, and `/de`) provide stable guide links, while the root page defaults to English and remembers each browser's selected language.
-- Added a responsive, dependency-free GitHub Pages showcase with playable repository audio, reference transcripts, language filters, and localized URLs for all 30 supported transcription languages. The browser UI now links to the showcase in the visitor's selected interface language.
+- Added a responsive, dependency-free GitHub Pages showcase with playable repository audio, reference transcripts, native-language filters, and self-contained localization for all 30 supported transcription languages. Selecting a language now filters its recording and localizes the page automatically, while the browser UI links to the matching language directly.
 
 The current development snapshot is published through the rolling tags from `main`:
 
