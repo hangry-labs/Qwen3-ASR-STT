@@ -463,6 +463,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ## Version History
 
+Snapshot commands intentionally follow the rolling `latest` tags. Published-release commands retain their readable version tag and also pin Docker Hub's immutable top-level OCI index digest; the digest is authoritative if a tag is ever changed.
+
 ### v1.1 Snapshot
 
 - Added an opt-in MCP Streamable HTTP endpoint to both Docker variants without loading another model. Its path-only transcription tool confines files to a configurable shared directory, while structured health and control tools expose inference/GPU state, forced-aligner lifecycle, and persistent realtime defaults. It reuses the REST API's inference and alignment boundary, enforces the same 100 MB limit, retains DNS-rebinding protection, and creates the input directory for existing persistent volumes.
@@ -510,13 +512,13 @@ Run this release with either image variant:
 **Standard image**
 
 ```bash
-docker run --name qwen3-asr-stt-v1-0 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:v1.0
+docker run --name qwen3-asr-stt-v1-0 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:v1.0@sha256:ea222327b6e999803715abdded7f714a689c54f83a30addbce30e83d163c4527
 ```
 
 **Tiny image**
 
 ```bash
-docker run --name qwen3-asr-stt-v1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:v1.0_tiny
+docker run --name qwen3-asr-stt-v1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:v1.0_tiny@sha256:92fe5ffec58b53c068895c94bfe407201cad2aa0f577ca03e842d9efb69257b7
 ```
 
 ### v0.2.0
@@ -540,13 +542,13 @@ Run this release with either image variant:
 **Standard image**
 
 ```bash
-docker run --name qwen3-asr-stt-v0-2-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:v0.2.0
+docker run --name qwen3-asr-stt-v0-2-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:v0.2.0@sha256:3b04e64ef9a516b879b8829dc142ad0b192adb371cc2162e610ea5c6da2eb7e3
 ```
 
 **Tiny image**
 
 ```bash
-docker run --name qwen3-asr-stt-v0-2-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_2_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.2.0_tiny
+docker run --name qwen3-asr-stt-v0-2-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_2_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.2.0_tiny@sha256:2facd0a2b4396ce656c38773bed7dba1d2ad6c401d2881ff39c0a81a83333524
 ```
 
 ### v0.1.0
@@ -576,13 +578,13 @@ Run this release with either image variant:
 **Standard image**
 
 ```bash
-docker run --name qwen3-asr-stt-v0-1-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:v0.1.0
+docker run --name qwen3-asr-stt-v0-1-0 --restart unless-stopped -p 8000:8000 --gpus all hangrylabs/qwen3-asr-stt:v0.1.0@sha256:da0ce7034fe162989e8c23bc6b28ccab40eda32708893eff203bb22532742916
 ```
 
 **Tiny image**
 
 ```bash
-docker run --name qwen3-asr-stt-v0-1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_1_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.1.0_tiny
+docker run --name qwen3-asr-stt-v0-1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_1_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.1.0_tiny@sha256:0274e0b2cfcbb5595f24fccec5b0dcbbdfc8e3baf2ba66c737154d843a73f3fe
 ```
 
 ## Responsible Use and Privacy
