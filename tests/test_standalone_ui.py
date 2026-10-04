@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -9,6 +11,9 @@ from fastapi.testclient import TestClient
 
 from qwen_asr.standalone_ui.gpu import GpuMonitor, read_gpu_stats
 from qwen_asr.standalone_ui.server import _example_catalog, _read_version_file, attach_ui
+
+
+LOCALES_DIR = Path(__file__).parents[1] / "qwen_asr" / "standalone_ui" / "static" / "locales"
 
 
 class StandaloneUiTests(unittest.TestCase):
@@ -36,6 +41,8 @@ class StandaloneUiTests(unittest.TestCase):
             with TestClient(attach_ui(api_app=self.backend_app())) as client:
                 index = client.get("/")
                 script = client.get("/static/app.js")
+                translations = client.get("/static/i18n.js")
+                locale_manifest = client.get("/static/locales/manifest.json")
                 audio_editor = client.get("/static/audio-editor.js")
                 stylesheet = client.get("/static/styles.css")
                 icon_stylesheet = client.get("/static/vendor/lucide/lucide.css")
@@ -79,7 +86,19 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertNotIn("<span>Temperature</span>", index.text)
         self.assertIn(f"UI v{_read_version_file()}", index.text)
         self.assertNotIn("{{UI_VERSION}}", index.text)
+        self.assertNotIn("{{UI_LOCALE}}", index.text)
+        self.assertNotIn("{{UI_DIRECTION}}", index.text)
+        self.assertNotIn("{{UI_BOOTSTRAP}}", index.text)
+        self.assertIn('<html lang="en" dir="ltr">', index.text)
+        self.assertIn('id="ui-locale"', index.text)
+        self.assertIn('"locale":"en"', index.text)
+        self.assertIn('"messages":{"app.title":"Qwen3-ASR-STT"', index.text)
         self.assertEqual(script.status_code, 200)
+        self.assertEqual(translations.status_code, 200)
+        self.assertIn("localStorage.setItem(bootstrap.storageKey", translations.text)
+        self.assertIn("window.location.assign", translations.text)
+        self.assertEqual(locale_manifest.status_code, 200)
+        self.assertEqual(locale_manifest.json()["defaultLocale"], "en")
         self.assertIn("RealtimeRecorder", script.text)
         self.assertIn("gpuWindowMs: 60 * 1000", script.text)
         self.assertIn("GPU_HISTORY_RETENTION_MS = 10 * 60 * 1000", script.text)
@@ -106,7 +125,7 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertIn("function resetUnsupportedExampleForTimestamps(", script.text)
         self.assertIn("async function restoreTimestampSession(", script.text)
         self.assertIn("timestampGranularities: state.timestampSessionRestored", script.text)
-        self.assertIn("setStatus('Aligner ready', 'success')", script.text)
+        self.assertIn("setStatus(t('aligner.readyStatus'), 'success')", script.text)
         self.assertIn("/system/aligner/load", script.text)
         self.assertIn("/system/aligner/unload", script.text)
         self.assertIn("load_aligner_always", script.text)
@@ -152,6 +171,26 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertIsInstance(gpu.json()["gpus"], list)
         self.assertEqual(gpu.headers["cache-control"], "no-store")
         self.assertEqual(health.json(), {"status": "ready"})
+
+    def test_supported_locale_routes_and_catalogs_are_complete(self) -> None:
+        expected_locales = ("en", "pl", "ja", "zh", "es", "de")
+        english = json.loads((LOCALES_DIR / "en.json").read_text(encoding="utf-8"))
+
+        with TestClient(attach_ui(api_app=self.backend_app())) as client:
+            for locale in expected_locales:
+                response = client.get(f"/{locale}")
+                self.assertEqual(response.status_code, 200, locale)
+                self.assertIn(f'<html lang="{locale}" dir="ltr">', response.text)
+                self.assertIn(f'"locale":"{locale}"', response.text)
+                self.assertIn('"messages":{"app.title":"Qwen3-ASR-STT"', response.text)
+
+                catalog_response = client.get(f"/static/locales/{locale}.json")
+                self.assertEqual(catalog_response.status_code, 200, locale)
+                catalog = catalog_response.json()
+                self.assertEqual(set(catalog), set(english), locale)
+                self.assertTrue(all(isinstance(value, str) and value for value in catalog.values()), locale)
+
+            self.assertEqual(client.get("/jp").status_code, 404)
 
     @patch("qwen_asr.standalone_ui.gpu.subprocess.run")
     def test_gpu_monitor_parses_nvidia_smi(self, run) -> None:
@@ -214,10 +253,12 @@ class StandaloneUiTests(unittest.TestCase):
         with patch.dict("os.environ", {"QWEN_ASR_UI_DEV": "1"}):
             with TestClient(attach_ui(api_app=self.backend_app())) as client:
                 index = client.get("/")
+                japanese = client.get("/ja")
                 stylesheet = client.get("/static/styles.css")
                 logo = client.get("/assets/qwen3_asr_favicon.webp")
 
         self.assertEqual(index.headers["cache-control"], "no-store")
+        self.assertEqual(japanese.headers["cache-control"], "no-store")
         self.assertEqual(stylesheet.headers["cache-control"], "no-store")
         self.assertEqual(logo.headers["cache-control"], "no-store")
 

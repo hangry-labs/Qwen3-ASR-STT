@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{UI_LOCALE}}" dir="{{UI_DIRECTION}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,7 +7,14 @@
   <title>Qwen3-ASR-STT</title>
   <link rel="icon" type="image/webp" href="/assets/qwen3_asr_favicon.webp">
   <script>
+    window.__QWEN_ASR_UI__ = {{UI_BOOTSTRAP}}
     try {
+      const localeConfig = window.__QWEN_ASR_UI__
+      const savedLocale = localStorage.getItem(localeConfig.storageKey)
+      const savedEntry = localeConfig.locales.find((item) => item.code === savedLocale)
+      if (location.pathname === '/' && savedEntry && savedEntry.code !== localeConfig.defaultLocale) {
+        location.replace(`${savedEntry.path}${location.search}${location.hash}`)
+      }
       const savedUi = JSON.parse(sessionStorage.getItem('qwen-asr-ui-state-v1') || 'null')
       if (savedUi?.headerCollapsed) document.documentElement.dataset.headerCollapsed = 'true'
     } catch {
@@ -20,187 +27,188 @@
 </head>
 <body>
   <header class="brand-hero" id="brand-hero" data-collapsed="false">
-    <img class="collapsed-mascot" src="/assets/qwen3_asr_favicon.webp" alt="Qwen3-ASR-STT mascot">
-    <nav class="brand-nav" aria-label="Application links">
+    <img class="collapsed-mascot" src="/assets/qwen3_asr_favicon.webp" alt="Qwen3-ASR-STT mascot" data-i18n-alt="brand.mascotAlt">
+    <nav class="brand-nav" aria-label="Application links" data-i18n-aria-label="nav.aria">
       <a class="labs-badge" href="https://nuggies.website/" target="_blank" rel="noreferrer" aria-label="Hangry Labs" title="Hangry Labs">
         <img src="/assets/hangrylabs_logo_horizontal.webp" alt="Hangry Labs">
         <span class="labs-badge-shine" aria-hidden="true"></span>
       </a>
       <div class="brand-links">
-        <a class="primary-link" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/tree/main/testbench" target="_blank" rel="noreferrer"><i class="icon-sparkles"></i>Examples</a>
-        <a href="/docs"><i class="icon-book-open"></i>API docs</a>
-        <a href="/v1/models"><i class="icon-boxes"></i>Models</a>
-        <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT" target="_blank" rel="noreferrer"><i class="icon-git-branch"></i>GitHub</a>
+        <a class="primary-link" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/tree/main/testbench" target="_blank" rel="noreferrer"><i class="icon-sparkles"></i><span data-i18n="nav.examples">Examples</span></a>
+        <a href="/docs"><i class="icon-book-open"></i><span data-i18n="nav.apiDocs">API docs</span></a>
+        <a href="/v1/models"><i class="icon-boxes"></i><span data-i18n="nav.models">Models</span></a>
+        <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT" target="_blank" rel="noreferrer"><i class="icon-git-branch"></i><span data-i18n="nav.github">GitHub</span></a>
+        <label class="locale-picker"><span class="visually-hidden" data-i18n="locale.label">Interface language</span><select id="ui-locale" aria-label="Interface language" data-i18n-aria-label="locale.label"></select></label>
       </div>
     </nav>
     <div class="brand-copy">
-      <h1><img class="product-logo" src="/assets/qwen3_asr_logo_horizontal.webp" alt="Qwen3-ASR-STT - Local Speech-to-Text, Browser UI, and API"></h1>
+      <h1><img class="product-logo" src="/assets/qwen3_asr_logo_horizontal.webp" alt="Qwen3-ASR-STT - Local Speech-to-Text, Browser UI, and API" data-i18n-alt="brand.productAlt"></h1>
     </div>
     <div class="runtime-badge" id="runtime-badge" data-state="starting">
       <i class="icon-activity"></i>
-      <div class="runtime-copy"><strong>Inference starting</strong><span id="runtime-model">Waiting for inference service</span></div>
-      <a class="runtime-version" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/releases" target="_blank" rel="noreferrer" title="Open Qwen3-ASR-STT releases">UI v{{UI_VERSION}}</a>
+      <div class="runtime-copy"><strong data-i18n="runtime.starting">Inference starting</strong><span id="runtime-model" data-i18n="runtime.waiting">Waiting for inference service</span></div>
+      <a class="runtime-version" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/releases" target="_blank" rel="noreferrer" title="Open Qwen3-ASR-STT releases" data-i18n-title="runtime.openReleases">UI v{{UI_VERSION}}</a>
     </div>
-    <button class="hero-toggle" id="hero-toggle" type="button" aria-controls="brand-hero" aria-expanded="true" aria-label="Collapse header" title="Collapse header"><i class="icon-chevron-up"></i></button>
+    <button class="hero-toggle" id="hero-toggle" type="button" aria-controls="brand-hero" aria-expanded="true" aria-label="Collapse header" title="Collapse header" data-i18n-aria-label="hero.collapse" data-i18n-title="hero.collapse"><i class="icon-chevron-up"></i></button>
   </header>
 
-  <div class="app-tabs" role="tablist" aria-label="Workspace views">
-    <button class="tab-button active" type="button" role="tab" aria-selected="true" data-tab="transcribe">Transcribe</button>
-    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="stream">Stream</button>
-    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="api">API</button>
-    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="system">System</button>
+  <div class="app-tabs" role="tablist" aria-label="Workspace views" data-i18n-aria-label="tabs.aria">
+    <button class="tab-button active" type="button" role="tab" aria-selected="true" data-tab="transcribe" data-i18n="tabs.transcribe">Transcribe</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="stream" data-i18n="tabs.stream">Stream</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="api" data-i18n="tabs.api">API</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" data-tab="system" data-i18n="tabs.system">System</button>
   </div>
 
   <main class="workspace">
     <aside class="settings-panel">
-      <div class="section-title"><i class="icon-sliders-horizontal"></i><span>Inference</span></div>
-      <div class="field"><span>Model</span><div class="model-display"><i class="icon-boxes"></i><strong id="model-name">Detecting active model…</strong></div></div>
-      <label class="field"><span>Language</span>
+      <div class="section-title"><i class="icon-sliders-horizontal"></i><span data-i18n="inference.title">Inference</span></div>
+      <div class="field"><span data-i18n="inference.model">Model</span><div class="model-display"><i class="icon-boxes"></i><strong id="model-name" data-i18n="inference.detectingModel">Detecting active model…</strong></div></div>
+      <label class="field"><span data-i18n="inference.language">Language</span>
         <select id="language">
-          <option>Auto</option><option>Chinese</option><option>English</option><option>Cantonese</option><option>Arabic</option>
-          <option>German</option><option>French</option><option>Spanish</option><option>Portuguese</option><option>Indonesian</option>
-          <option>Italian</option><option>Korean</option><option>Russian</option><option>Thai</option><option>Vietnamese</option>
-          <option>Japanese</option><option>Turkish</option><option>Hindi</option><option>Malay</option><option>Dutch</option>
-          <option>Swedish</option><option>Danish</option><option>Finnish</option><option>Polish</option><option>Czech</option>
-          <option>Filipino</option><option>Persian</option><option>Greek</option><option>Romanian</option><option>Hungarian</option><option>Macedonian</option>
+          <option value="Auto" data-i18n="languages.auto">Auto</option><option value="Chinese" data-i18n="languages.chinese">Chinese</option><option value="English" data-i18n="languages.english">English</option><option value="Cantonese" data-i18n="languages.cantonese">Cantonese</option><option value="Arabic" data-i18n="languages.arabic">Arabic</option>
+          <option value="German" data-i18n="languages.german">German</option><option value="French" data-i18n="languages.french">French</option><option value="Spanish" data-i18n="languages.spanish">Spanish</option><option value="Portuguese" data-i18n="languages.portuguese">Portuguese</option><option value="Indonesian" data-i18n="languages.indonesian">Indonesian</option>
+          <option value="Italian" data-i18n="languages.italian">Italian</option><option value="Korean" data-i18n="languages.korean">Korean</option><option value="Russian" data-i18n="languages.russian">Russian</option><option value="Thai" data-i18n="languages.thai">Thai</option><option value="Vietnamese" data-i18n="languages.vietnamese">Vietnamese</option>
+          <option value="Japanese" data-i18n="languages.japanese">Japanese</option><option value="Turkish" data-i18n="languages.turkish">Turkish</option><option value="Hindi" data-i18n="languages.hindi">Hindi</option><option value="Malay" data-i18n="languages.malay">Malay</option><option value="Dutch" data-i18n="languages.dutch">Dutch</option>
+          <option value="Swedish" data-i18n="languages.swedish">Swedish</option><option value="Danish" data-i18n="languages.danish">Danish</option><option value="Finnish" data-i18n="languages.finnish">Finnish</option><option value="Polish" data-i18n="languages.polish">Polish</option><option value="Czech" data-i18n="languages.czech">Czech</option>
+          <option value="Filipino" data-i18n="languages.filipino">Filipino</option><option value="Persian" data-i18n="languages.persian">Persian</option><option value="Greek" data-i18n="languages.greek">Greek</option><option value="Romanian" data-i18n="languages.romanian">Romanian</option><option value="Hungarian" data-i18n="languages.hungarian">Hungarian</option><option value="Macedonian" data-i18n="languages.macedonian">Macedonian</option>
         </select>
       </label>
-      <label class="field"><span>Prompt / context</span><textarea id="prompt" rows="5" placeholder="Optional spelling or context"></textarea></label>
-      <div class="status-line" id="global-status" data-tone="neutral">Connecting to inference</div>
+      <label class="field"><span data-i18n="inference.prompt">Prompt / context</span><textarea id="prompt" rows="5" placeholder="Optional spelling or context" data-i18n-placeholder="inference.promptPlaceholder"></textarea></label>
+      <div class="status-line" id="global-status" data-tone="neutral" data-i18n="status.connecting">Connecting to inference</div>
     </aside>
 
     <section class="content-panel">
       <div class="tab-panel" data-panel="transcribe">
         <form id="transcribe-form">
           <div class="panel-toolbar">
-            <label class="compact-field"><span>Response format</span>
+            <label class="compact-field"><span data-i18n="transcribe.responseFormat">Response format</span>
               <select id="response-format"><option>json</option><option>text</option><option>verbose_json</option><option>srt</option><option>vtt</option></select>
             </label>
             <div class="timestamp-options">
-              <span>Timestamps</span>
-              <label><input type="checkbox" name="timestamp" value="word"> Word</label>
-              <label><input type="checkbox" name="timestamp" value="segment"> Segment</label>
-              <small id="timestamp-support" data-state="checking" role="status" aria-live="polite">Checking aligner…</small>
+              <span data-i18n="transcribe.timestamps">Timestamps</span>
+              <label><input type="checkbox" name="timestamp" value="word"> <span data-i18n="transcribe.word">Word</span></label>
+              <label><input type="checkbox" name="timestamp" value="segment"> <span data-i18n="transcribe.segment">Segment</span></label>
+              <small id="timestamp-support" data-state="checking" role="status" aria-live="polite" data-i18n="aligner.checking">Checking aligner…</small>
             </div>
           </div>
 
-          <div class="segmented-control" aria-label="Audio source">
-            <button class="active" type="button" data-source="upload"><i class="icon-upload"></i> Upload</button>
-            <button type="button" data-source="record"><i class="icon-mic"></i> Record</button>
+          <div class="segmented-control" aria-label="Audio source" data-i18n-aria-label="audio.source">
+            <button class="active" type="button" data-source="upload"><i class="icon-upload"></i> <span data-i18n="audio.upload">Upload</span></button>
+            <button type="button" data-source="record"><i class="icon-mic"></i> <span data-i18n="audio.record">Record</span></button>
           </div>
 
           <div id="upload-source">
             <div id="upload-editor"></div>
             <div class="example-row">
-              <label class="compact-field grow"><span>Example file</span><select id="example-select"><option value="">Choose an example</option></select></label>
+              <label class="compact-field grow"><span data-i18n="audio.exampleFile">Example file</span><select id="example-select"><option value="" data-i18n="audio.chooseExample">Choose an example</option></select></label>
             </div>
           </div>
 
           <div id="record-source" hidden>
             <div id="record-editor"></div>
             <div class="record-controls" id="record-controls">
-              <div class="record-state" id="record-state" aria-live="polite">Ready to record</div>
+              <div class="record-state" id="record-state" aria-live="polite" data-i18n="record.ready">Ready to record</div>
               <div class="record-toolbar">
-                <label class="compact-field grow"><span>Microphone</span><select id="record-device"><option value="">Default microphone</option></select></label>
-                <button class="icon-button bordered device-refresh" id="record-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
-                <button class="record-button" id="record-toggle" type="button" aria-pressed="false"><i class="icon-mic"></i> Record</button>
+                <label class="compact-field grow"><span data-i18n="record.microphone">Microphone</span><select id="record-device"><option value="" data-i18n="record.defaultMicrophone">Default microphone</option></select></label>
+                <button class="icon-button bordered device-refresh" id="record-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones" data-i18n-title="record.refreshMicrophones" data-i18n-aria-label="record.refreshMicrophones"><i class="icon-refresh-cw"></i></button>
+                <button class="record-button" id="record-toggle" type="button" aria-pressed="false"><i class="icon-mic"></i> <span data-i18n="audio.record">Record</span></button>
               </div>
             </div>
           </div>
 
-          <button class="primary-button" id="transcribe-button" type="submit"><i class="icon-audio-lines"></i> Transcribe</button>
+          <button class="primary-button" id="transcribe-button" type="submit"><i class="icon-audio-lines"></i> <span data-i18n="tabs.transcribe">Transcribe</span></button>
         </form>
 
         <section class="output-section">
-          <div class="section-title"><i class="icon-message-square-text"></i><span>Transcript</span></div>
+          <div class="section-title"><i class="icon-message-square-text"></i><span data-i18n="transcribe.transcript">Transcript</span></div>
           <div class="transcript-output" id="transcript-output"></div>
-          <details><summary>Response details</summary><pre id="response-output"></pre></details>
+          <details><summary data-i18n="transcribe.responseDetails">Response details</summary><pre id="response-output"></pre></details>
         </section>
       </div>
 
       <div class="tab-panel" data-panel="stream" hidden>
         <div class="live-recorder">
           <div class="audio-editor-head">
-            <div class="audio-label"><i class="icon-mic"></i><span>Realtime microphone</span><small id="realtime-state">Ready</small></div>
-            <button class="icon-button" id="realtime-reset" type="button" title="Reset realtime session" aria-label="Reset realtime session"><i class="icon-x"></i></button>
+            <div class="audio-label"><i class="icon-mic"></i><span data-i18n="stream.microphone">Realtime microphone</span><small id="realtime-state" data-i18n="realtime.ready">Ready</small></div>
+            <button class="icon-button" id="realtime-reset" type="button" title="Reset realtime session" aria-label="Reset realtime session" data-i18n-title="stream.reset" data-i18n-aria-label="stream.reset"><i class="icon-x"></i></button>
           </div>
-          <canvas id="realtime-wave" aria-label="Live microphone waveform"></canvas>
+          <canvas id="realtime-wave" aria-label="Live microphone waveform" data-i18n-aria-label="stream.waveform"></canvas>
           <div class="live-controls">
-            <button class="record-button" id="realtime-toggle" type="button" aria-pressed="false"><span class="record-dot"></span> Start</button>
-            <label class="device-field"><select id="realtime-device"><option value="">Default microphone</option></select></label>
-            <button class="icon-button bordered device-refresh" id="realtime-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones"><i class="icon-refresh-cw"></i></button>
+            <button class="record-button" id="realtime-toggle" type="button" aria-pressed="false"><span class="record-dot"></span> <span data-i18n="realtime.start">Start</span></button>
+            <label class="device-field"><select id="realtime-device"><option value="" data-i18n="record.defaultMicrophone">Default microphone</option></select></label>
+            <button class="icon-button bordered device-refresh" id="realtime-device-refresh" type="button" title="Refresh microphones" aria-label="Refresh microphones" data-i18n-title="record.refreshMicrophones" data-i18n-aria-label="record.refreshMicrophones"><i class="icon-refresh-cw"></i></button>
           </div>
         </div>
 
         <details class="settings-details">
-          <summary>Realtime settings</summary>
+          <summary data-i18n="stream.settings">Realtime settings</summary>
           <div class="range-grid">
             <label>
-              <span class="range-heading"><span class="setting-name">Chunk seconds <span class="setting-help"><button type="button" aria-label="About chunk seconds" aria-describedby="chunk-size-help">i</button><span class="setting-tooltip" id="chunk-size-help" role="tooltip">Audio collected for each incremental decode. Lower values update sooner but run inference more often; higher values add latency and context.</span></span></span><output data-output="chunk-size"></output></span>
+              <span class="range-heading"><span class="setting-name"><span data-i18n="settings.chunkSeconds">Chunk seconds</span> <span class="setting-help"><button type="button" aria-label="About chunk seconds" aria-describedby="chunk-size-help" data-i18n-aria-label="settings.aboutChunkSeconds">i</button><span class="setting-tooltip" id="chunk-size-help" role="tooltip" data-i18n="settings.chunkHelp">Audio collected for each incremental decode. Lower values update sooner but run inference more often; higher values add latency and context.</span></span></span><output data-output="chunk-size"></output></span>
               <input id="chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2">
             </label>
             <label>
-              <span class="range-heading"><span class="setting-name">Audio window <span class="setting-help"><button type="button" aria-label="About audio window" aria-describedby="max-window-help">i</button><span class="setting-tooltip" id="max-window-help" role="tooltip">Maximum recent audio reprocessed by each update. Older stable text is retained separately, keeping long-session latency and model context bounded.</span></span></span><output data-output="max-window"></output></span>
+              <span class="range-heading"><span class="setting-name"><span data-i18n="settings.audioWindow">Audio window</span> <span class="setting-help"><button type="button" aria-label="About audio window" aria-describedby="max-window-help" data-i18n-aria-label="settings.aboutAudioWindow">i</button><span class="setting-tooltip" id="max-window-help" role="tooltip" data-i18n="settings.audioWindowHelp">Maximum recent audio reprocessed by each update. Older stable text is retained separately, keeping long-session latency and model context bounded.</span></span></span><output data-output="max-window"></output></span>
               <input id="max-window" data-setting type="range" min="10" max="60" step="5" value="30">
             </label>
             <label>
-              <span class="range-heading"><span class="setting-name">Unfixed chunks <span class="setting-help"><button type="button" aria-label="About unfixed chunks" aria-describedby="unfixed-chunks-help">i</button><span class="setting-tooltip" id="unfixed-chunks-help" role="tooltip">Opening chunks decoded without using the previous transcript as a prefix. Higher values let early wording remain revisable for longer.</span></span></span><output data-output="unfixed-chunks"></output></span>
+              <span class="range-heading"><span class="setting-name"><span data-i18n="settings.unfixedChunks">Unfixed chunks</span> <span class="setting-help"><button type="button" aria-label="About unfixed chunks" aria-describedby="unfixed-chunks-help" data-i18n-aria-label="settings.aboutUnfixedChunks">i</button><span class="setting-tooltip" id="unfixed-chunks-help" role="tooltip" data-i18n="settings.unfixedChunksHelp">Opening chunks decoded without using the previous transcript as a prefix. Higher values let early wording remain revisable for longer.</span></span></span><output data-output="unfixed-chunks"></output></span>
               <input id="unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2">
             </label>
             <label>
-              <span class="range-heading"><span class="setting-name">Unfixed tokens <span class="setting-help"><button type="button" aria-label="About unfixed tokens" aria-describedby="unfixed-tokens-help">i</button><span class="setting-tooltip" id="unfixed-tokens-help" role="tooltip">Trailing tokens removed before the previous transcript is reused as context. Higher values let more recent words be corrected and reduce boundary jitter.</span></span></span><output data-output="unfixed-tokens"></output></span>
+              <span class="range-heading"><span class="setting-name"><span data-i18n="settings.unfixedTokens">Unfixed tokens</span> <span class="setting-help"><button type="button" aria-label="About unfixed tokens" aria-describedby="unfixed-tokens-help" data-i18n-aria-label="settings.aboutUnfixedTokens">i</button><span class="setting-tooltip" id="unfixed-tokens-help" role="tooltip" data-i18n="settings.unfixedTokensHelp">Trailing tokens removed before the previous transcript is reused as context. Higher values let more recent words be corrected and reduce boundary jitter.</span></span></span><output data-output="unfixed-tokens"></output></span>
               <input id="unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5">
             </label>
           </div>
         </details>
 
         <section class="output-section realtime-output-section">
-          <div class="output-heading"><div class="section-title"><i class="icon-radio"></i><span>Realtime transcript</span></div><div><span id="realtime-language">Auto detection</span><span class="final-badge" id="realtime-final" hidden>Final</span></div></div>
+          <div class="output-heading"><div class="section-title"><i class="icon-radio"></i><span data-i18n="stream.transcript">Realtime transcript</span></div><div><span id="realtime-language" data-i18n="realtime.autoDetection">Auto detection</span><span class="final-badge" id="realtime-final" hidden data-i18n="realtime.final">Final</span></div></div>
           <div class="transcript-output" id="realtime-output"></div>
         </section>
       </div>
 
       <div class="tab-panel" data-panel="api" hidden>
-        <div class="view-heading"><div><h2>API status</h2><p>OpenAI-compatible runtime endpoints</p></div><button class="secondary-button" id="api-refresh" type="button"><i class="icon-refresh-cw"></i> Refresh</button></div>
-        <pre class="data-output" id="api-output">Select Refresh to query the API.</pre>
+        <div class="view-heading"><div><h2 data-i18n="api.title">API status</h2><p data-i18n="api.description">OpenAI-compatible runtime endpoints</p></div><button class="secondary-button" id="api-refresh" type="button"><i class="icon-refresh-cw"></i> <span data-i18n="common.refresh">Refresh</span></button></div>
+        <pre class="data-output" id="api-output" data-i18n="api.refreshPrompt">Select Refresh to query the API.</pre>
       </div>
 
       <div class="tab-panel" data-panel="system" hidden>
-        <div class="view-heading"><div><h2>System</h2><p>Inference readiness and GPU runtime</p></div></div>
+        <div class="view-heading"><div><h2 data-i18n="system.title">System</h2><p data-i18n="system.description">Inference readiness and GPU runtime</p></div></div>
         <section class="aligner-settings-card" aria-labelledby="aligner-settings-title">
           <div class="aligner-settings-copy">
             <div class="aligner-settings-heading">
-              <div><i class="icon-audio-lines"></i><strong id="aligner-settings-title">Forced aligner</strong></div>
-              <span class="aligner-status-badge" id="aligner-status-badge" data-state="checking">Checking…</span>
+              <div><i class="icon-audio-lines"></i><strong id="aligner-settings-title" data-i18n="aligner.title">Forced aligner</strong></div>
+              <span class="aligner-status-badge" id="aligner-status-badge" data-state="checking" data-i18n="common.checking">Checking…</span>
             </div>
-            <p>Word and caption-style segment timestamps use an additional multilingual Qwen3-ForcedAligner model. Unchecking both timestamp options releases it after 60 seconds unless it is kept loaded here. First load can add roughly 3.3 GiB of VRAM; some compiled CUDA context may remain cached after release.</p>
-            <span class="aligner-model-name" id="aligner-model-name">Detecting aligner configuration…</span>
+            <p data-i18n="aligner.description">Word and caption-style segment timestamps use an additional multilingual Qwen3-ForcedAligner model. Unchecking both timestamp options releases it after 60 seconds unless it is kept loaded here. First load can add roughly 3.3 GiB of VRAM; some compiled CUDA context may remain cached after release.</p>
+            <span class="aligner-model-name" id="aligner-model-name" data-i18n="aligner.detecting">Detecting aligner configuration…</span>
           </div>
           <div class="aligner-settings-actions">
             <label class="switch-field" for="aligner-load-always">
-              <span><strong>Always keep aligner loaded</strong><small>Persist this preference and load the model during every startup.</small></span>
+              <span><strong data-i18n="aligner.keepLoaded">Always keep aligner loaded</strong><small data-i18n="aligner.keepLoadedHelp">Persist this preference and load the model during every startup.</small></span>
               <input id="aligner-load-always" type="checkbox" role="switch">
             </label>
             <div class="aligner-action-row">
-              <button class="secondary-button" id="aligner-load-now" type="button">Load now</button>
-              <button class="secondary-button" id="aligner-unload-now" type="button">Release VRAM</button>
+              <button class="secondary-button" id="aligner-load-now" type="button" data-i18n="aligner.loadNow">Load now</button>
+              <button class="secondary-button" id="aligner-unload-now" type="button" data-i18n="aligner.releaseVram">Release VRAM</button>
             </div>
           </div>
         </section>
         <section class="runtime-settings-card" aria-labelledby="realtime-defaults-title">
           <div class="runtime-settings-heading">
-            <div><i class="icon-sliders-horizontal"></i><strong id="realtime-defaults-title">Realtime defaults</strong></div>
-            <button class="secondary-button" id="realtime-defaults-save" type="button">Save defaults</button>
+            <div><i class="icon-sliders-horizontal"></i><strong id="realtime-defaults-title" data-i18n="system.realtimeDefaults">Realtime defaults</strong></div>
+            <button class="secondary-button" id="realtime-defaults-save" type="button" data-i18n="system.saveDefaults">Save defaults</button>
           </div>
-          <p>Persistent starting values for new browser and API realtime sessions. Individual API requests can still override them.</p>
+          <p data-i18n="system.realtimeDefaultsHelp">Persistent starting values for new browser and API realtime sessions. Individual API requests can still override them.</p>
           <div class="range-grid">
-            <label><span class="range-heading"><span>Chunk seconds</span><output data-output="system-chunk-size"></output></span><input id="system-chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2"></label>
-            <label><span class="range-heading"><span>Audio window</span><output data-output="system-max-window"></output></span><input id="system-max-window" data-setting type="range" min="10" max="60" step="5" value="30"></label>
-            <label><span class="range-heading"><span>Unfixed chunks</span><output data-output="system-unfixed-chunks"></output></span><input id="system-unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2"></label>
-            <label><span class="range-heading"><span>Unfixed tokens</span><output data-output="system-unfixed-tokens"></output></span><input id="system-unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5"></label>
+            <label><span class="range-heading"><span data-i18n="settings.chunkSeconds">Chunk seconds</span><output data-output="system-chunk-size"></output></span><input id="system-chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2"></label>
+            <label><span class="range-heading"><span data-i18n="settings.audioWindow">Audio window</span><output data-output="system-max-window"></output></span><input id="system-max-window" data-setting type="range" min="10" max="60" step="5" value="30"></label>
+            <label><span class="range-heading"><span data-i18n="settings.unfixedChunks">Unfixed chunks</span><output data-output="system-unfixed-chunks"></output></span><input id="system-unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2"></label>
+            <label><span class="range-heading"><span data-i18n="settings.unfixedTokens">Unfixed tokens</span><output data-output="system-unfixed-tokens"></output></span><input id="system-unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5"></label>
           </div>
         </section>
-        <div class="system-grid"><pre class="data-output" id="readiness-output">Readiness unavailable.</pre><section class="gpu-system-panel" id="gpu-output" aria-live="polite"></section></div>
+        <div class="system-grid"><pre class="data-output" id="readiness-output" data-i18n="system.readinessUnavailable">Readiness unavailable.</pre><section class="gpu-system-panel" id="gpu-output" aria-live="polite"></section></div>
       </div>
     </section>
   </main>

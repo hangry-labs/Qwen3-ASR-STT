@@ -17,7 +17,7 @@ export class RealtimeRecorder {
   async start(options) {
     if (this.running) return
     this.options = options
-    this.onState('Requesting microphone')
+    this.onState('requestingMicrophone')
     const constraints = options.deviceId ? { audio: { deviceId: { exact: options.deviceId } } } : { audio: true }
     this.stream = await navigator.mediaDevices.getUserMedia(constraints)
     const response = await fetch('/v1/realtime/transcriptions/sessions', {
@@ -48,7 +48,7 @@ export class RealtimeRecorder {
     this.targetSamples = Math.max(1, Math.round(this.context.sampleRate * 1.0))
     this.running = true
     this.startedAt = performance.now()
-    this.onState('Recording')
+    this.onState('recording')
     this.draw()
   }
 
@@ -57,7 +57,7 @@ export class RealtimeRecorder {
     this.buffers.push(new Float32Array(samples))
     this.bufferedSamples += samples.length
     this.elapsedSamples += samples.length
-    this.onState(`Recording ${formatTime(this.elapsedSamples / this.context.sampleRate)}`)
+    this.onState('recording', { time: formatTime(this.elapsedSamples / this.context.sampleRate) })
     if (this.bufferedSamples >= this.targetSamples) this.enqueueChunk()
   }
 
@@ -105,7 +105,7 @@ export class RealtimeRecorder {
     }
     await this.context?.close()
     this.sessionId = null
-    this.onState('Finalized')
+    this.onState('finalized')
     this.clearCanvas()
   }
 
@@ -124,7 +124,7 @@ export class RealtimeRecorder {
     this.elapsedSamples = 0
     this.requestQueue = Promise.resolve()
     this.onTranscript('', '', false)
-    this.onState('Ready')
+    this.onState('ready')
     this.clearCanvas()
   }
 

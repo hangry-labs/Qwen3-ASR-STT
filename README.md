@@ -460,6 +460,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Reproduced the prompt/context leakage reported in [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186): forced-language decoding can copy context when audio is silent or weak, while real speech can anchor the same context as a useful vocabulary hint. This upstream model behavior remains unchanged rather than adding lossy prompt filtering or a separate hotword model.
 - Added GitHub Container Registry as an official image mirror. One workflow publishes identical full and tiny rolling and immutable tags to Docker Hub and GHCR.
 - Unified full and tiny publishing in one Buildx job so both variants reuse the same dependency graph without loading either image into the runner's Docker store. Model prefetch now depends only on its focused downloader code and build arguments, and baked assets occupy an independent final-image layer, allowing unrelated UI/API changes to reuse both the downloads and the large model layer.
+- Added complete browser UI localization for English, Polish, Japanese, Chinese, Spanish, and German. Official locale routes (`/en`, `/pl`, `/ja`, `/zh`, `/es`, and `/de`) provide stable guide links, while the root page defaults to English and remembers each browser's selected language.
 
 The current development snapshot is published through the rolling tags from `main`:
 

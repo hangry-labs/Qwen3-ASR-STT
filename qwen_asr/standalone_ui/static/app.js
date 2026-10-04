@@ -1,6 +1,9 @@
 import { AudioEditor } from './audio-editor.js'
 import { formatTime } from './audio-utils.js'
+import { browserLanguage, initializeI18n, languageLabel, t } from './i18n.js'
 import { RealtimeRecorder } from './realtime.js'
+
+await initializeI18n()
 
 const $ = (selector, root = document) => root.querySelector(selector)
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)]
@@ -33,18 +36,18 @@ const ALIGNER_IDLE_UNLOAD_MS = 60 * 1000
 const UI_SESSION_KEY = 'qwen-asr-ui-state-v1'
 const GPU_SESSION_KEY = 'qwen-asr-gpu-history-v1'
 const GPU_METRICS = [
-  { key: 'utilization', label: 'GPU', color: '#ff7a1a' },
-  { key: 'memory_utilization', label: 'Memory activity', color: '#c586c0' },
-  { key: 'memory_used', label: 'VRAM', color: '#72a7ff' },
-  { key: 'temperature', label: 'Temperature', color: '#ef6b73' },
-  { key: 'power', label: 'Power', color: '#f2c94c' },
-  { key: 'fan_speed', label: 'Fan', color: '#55c58a' },
-  { key: 'graphics_clock', label: 'Graphics clock', color: '#9cdcfe' },
-  { key: 'memory_clock', label: 'Memory clock', color: '#ce9178' },
+  { key: 'utilization', label: t('gpu.metric.gpu'), color: '#ff7a1a' },
+  { key: 'memory_utilization', label: t('gpu.metric.memoryActivity'), color: '#c586c0' },
+  { key: 'memory_used', label: t('gpu.metric.vram'), color: '#72a7ff' },
+  { key: 'temperature', label: t('gpu.metric.temperature'), color: '#ef6b73' },
+  { key: 'power', label: t('gpu.metric.power'), color: '#f2c94c' },
+  { key: 'fan_speed', label: t('gpu.metric.fan'), color: '#55c58a' },
+  { key: 'graphics_clock', label: t('gpu.metric.graphicsClock'), color: '#9cdcfe' },
+  { key: 'memory_clock', label: t('gpu.metric.memoryClock'), color: '#ce9178' },
 ]
 
-const uploadEditor = new AudioEditor($('#upload-editor'), { label: 'Upload audio' })
-const recordEditor = new AudioEditor($('#record-editor'), { label: 'Recorded audio' })
+const uploadEditor = new AudioEditor($('#upload-editor'), { label: t('audio.uploadLabel') })
+const recordEditor = new AudioEditor($('#record-editor'), { label: t('audio.recordedLabel') })
 recordEditor.container.append($('#record-controls'))
 
 function setStatus(message, tone = 'neutral') {
@@ -140,7 +143,7 @@ function setHeroCollapsed(collapsed, persist = true, animate = true) {
   const startHeight = hero.getBoundingClientRect().height
 
   state.headerCollapsed = collapsed
-  const action = collapsed ? 'Expand header' : 'Collapse header'
+  const action = collapsed ? t('hero.expand') : t('hero.collapse')
   document.documentElement.dataset.headerCollapsed = String(collapsed)
   hero.dataset.collapsed = String(collapsed)
   toggle.setAttribute('aria-expanded', String(!collapsed))
@@ -202,11 +205,11 @@ $$('[data-source]').forEach((button) => button.addEventListener('click', () => {
 async function refreshAudioDevices(select) {
   const current = select.value
   const devices = await AudioEditor.audioInputDevices()
-  select.innerHTML = '<option value="">Default microphone</option>'
+  select.replaceChildren(new Option(t('record.defaultMicrophone'), ''))
   devices.forEach((device, index) => {
     const option = document.createElement('option')
     option.value = device.deviceId
-    option.textContent = device.label || `Microphone ${index + 1}`
+    option.textContent = device.label || t('record.microphoneNumber', { number: index + 1 })
     select.append(option)
   })
   if ([...select.options].some((option) => option.value === current)) select.value = current
@@ -221,21 +224,21 @@ function setRecordButton(recording, busy = false) {
   $('#record-device').disabled = recording || busy
   $('#record-device-refresh').disabled = recording || busy
   if (changed) button.innerHTML = recording
-    ? '<i class="icon-square"></i> Stop recording'
-    : '<i class="icon-mic"></i> Record'
+    ? `<i class="icon-square"></i> ${t('record.stop')}`
+    : `<i class="icon-mic"></i> ${t('audio.record')}`
 }
 
 recordEditor.attachRecorder({
   onStart: () => {
     setRecordButton(true)
-    $('#record-state').textContent = 'Recording 0:00'
+    $('#record-state').textContent = t('record.recording', { time: '0:00' })
   },
   onProgress: (duration) => {
-    $('#record-state').textContent = `Recording ${formatTime(duration / 1000)}`
+    $('#record-state').textContent = t('record.recording', { time: formatTime(duration / 1000) })
   },
   onEnd: (_file, duration) => {
     setRecordButton(false)
-    $('#record-state').textContent = `Recording ready · ${formatTime(duration / 1000)}`
+    $('#record-state').textContent = t('record.recordingReady', { time: formatTime(duration / 1000) })
   },
 })
 setRecordButton(false)
@@ -254,7 +257,7 @@ $('#record-toggle').addEventListener('click', async () => {
     await refreshAudioDevices($('#record-device'))
   } catch (error) {
     setRecordButton(false)
-    $('#record-state').textContent = 'Ready to record'
+    $('#record-state').textContent = t('record.ready')
     showToast(errorMessage(error))
   }
 })
@@ -276,7 +279,7 @@ async function loadExamples() {
   payload.examples.forEach((example) => {
     const option = document.createElement('option')
     option.value = example.url
-    option.textContent = example.label
+    option.textContent = `${languageLabel(example.language)} · ${example.name}`
     option.dataset.language = example.language
     option.dataset.name = example.name
     select.append(option)
@@ -290,16 +293,16 @@ $('#example-select').addEventListener('change', async () => {
   const select = $('#example-select')
   select.disabled = true
   try {
-    setStatus('Loading example')
+    setStatus(t('status.loadingExample'))
     const response = await fetch(option.value)
     if (!response.ok) throw new Error(await responseError(response))
     await uploadEditor.load(await response.blob(), option.dataset.name)
     state.source = 'upload'
     $('[data-source="upload"]').click()
-    setStatus('Example ready', 'success')
+    setStatus(t('status.exampleReady'), 'success')
   } catch (error) {
     select.value = ''
-    setStatus('Example load failed', 'error')
+    setStatus(t('status.exampleFailed'), 'error')
     showToast(errorMessage(error))
   } finally {
     select.disabled = false
@@ -319,7 +322,7 @@ function syncTimestampResponseFormat() {
     }
     select.value = 'verbose_json'
     select.disabled = true
-    select.title = 'Word and Segment timestamps require verbose_json output.'
+    select.title = t('timestamp.verboseRequired')
     return
   }
   select.disabled = false
@@ -334,7 +337,8 @@ function timestampLanguageOptionIssue(language, aligner = state.aligner) {
   if (!language || language === 'Auto' || !aligner) return null
   const supported = Array.isArray(aligner.model_supported_languages) ? aligner.model_supported_languages : []
   if (supported.length && !supported.includes(language)) {
-    return `${language} transcription is supported, but the Qwen forced aligner does not support ${language} timestamps.`
+    const label = languageLabel(language)
+    return t('timestamp.languageUnsupported', { language: label })
   }
   const unavailable = aligner.unavailable_languages && typeof aligner.unavailable_languages === 'object'
     ? aligner.unavailable_languages
@@ -358,8 +362,8 @@ function resetUnsupportedExampleForTimestamps(aligner = state.aligner) {
   select.value = ''
   $('#transcript-output').textContent = ''
   $('#response-output').textContent = ''
-  setStatus('Choose a timestamp-compatible sample')
-  return `${language} example removed because its timestamps are unavailable. Choose another sample or upload audio in a supported language.`
+  setStatus(t('timestamp.chooseCompatible'))
+  return t('timestamp.exampleRemoved', { language: languageLabel(language) })
 }
 
 function syncTimestampLanguageOptions(aligner = state.aligner) {
@@ -372,7 +376,7 @@ function syncTimestampLanguageOptions(aligner = state.aligner) {
     option.title = issue || ''
   })
   select.title = timestampsSelected
-    ? 'Languages without forced-alignment support are disabled while timestamps are selected.'
+    ? t('timestamp.languagesDisabled')
     : ''
 }
 
@@ -387,7 +391,7 @@ function syncTimestampExampleOptions(aligner = state.aligner) {
     option.title = issue || ''
   })
   select.title = timestampsSelected
-    ? 'Examples without forced-alignment support are disabled while timestamps are selected.'
+    ? t('timestamp.examplesDisabled')
     : ''
 }
 
@@ -409,7 +413,7 @@ async function releaseIdleAligner() {
   try {
     const aligner = await fetchJson('/system/aligner/unload', { method: 'POST' })
     updateTimestampAvailability(aligner)
-    showToast('Unused forced aligner released from VRAM.', 'success')
+    showToast(t('aligner.unusedReleased'), 'success')
   } catch (error) {
     showToast(errorMessage(error))
     await refreshAlignerSettings().catch(() => {})
@@ -435,15 +439,15 @@ function updateTimestampAvailability(aligner) {
   const support = $('#timestamp-support')
   support.dataset.state = languageIssue ? 'unavailable' : loaded ? 'available' : configured ? 'on-demand' : 'unavailable'
   support.textContent = languageIssue
-    ? `${$('#language').value} timestamps unavailable`
+    ? t('timestamp.languageUnavailable', { language: languageLabel($('#language').value) })
     : loaded && state.alignerUnloadTimer
-      ? 'Aligner idle · releases after 60s'
-      : loaded ? 'Aligner ready' : status === 'loading' ? 'Loading aligner…' : configured ? 'Loads on selection' : 'Aligner unavailable'
+      ? t('aligner.idleRelease')
+      : loaded ? t('aligner.readyStatus') : status === 'loading' ? t('aligner.loading') : configured ? t('aligner.loadsOnSelection') : t('aligner.unavailable')
   support.title = languageIssue || (loaded
-    ? 'Word and segment timestamps are ready.'
+    ? t('aligner.wordsReady')
     : configured
-      ? 'Selecting Word or Segment will load the forced aligner into VRAM for this session.'
-      : 'No forced-aligner model is configured for this deployment.')
+      ? t('aligner.selectionLoads')
+      : t('aligner.notConfigured'))
   syncTimestampLanguageOptions(aligner)
   syncTimestampExampleOptions(aligner)
   renderAlignerSettings(aligner)
@@ -462,7 +466,7 @@ async function loadAlignerOnDemand() {
   if (state.aligner?.loaded) return state.aligner
   setAlignerBusy(true)
   updateTimestampAvailability({ ...state.aligner, configured: true, loaded: false, status: 'loading' })
-  setStatus('Loading timestamp aligner')
+  setStatus(t('aligner.loadingStatus'))
   const statusPoll = setInterval(async () => {
     try {
       const aligner = await fetchJson('/system/aligner')
@@ -474,8 +478,8 @@ async function loadAlignerOnDemand() {
   try {
     const aligner = await fetchJson('/system/aligner/load', { method: 'POST' })
     updateTimestampAvailability(aligner)
-    setStatus('Aligner ready', 'success')
-    showToast('Forced aligner loaded. Timestamp output is ready.', 'success')
+    setStatus(t('aligner.readyStatus'), 'success')
+    showToast(t('aligner.loadedToast'), 'success')
     return aligner
   } finally {
     clearInterval(statusPoll)
@@ -545,8 +549,8 @@ $$('input[name="timestamp"]').forEach((input) => input.addEventListener('change'
     persistUiSession()
     showToast(
       state.timestampsAvailable === false
-        ? 'Timestamp output is unavailable because no forced-aligner model is configured.'
-        : 'Timestamp support is still being checked. Please try again when inference is ready.',
+        ? t('timestamp.noModel')
+        : t('timestamp.stillChecking'),
     )
     return
   }
@@ -578,7 +582,7 @@ $('#transcribe-form').addEventListener('submit', async (event) => {
   const editor = state.source === 'upload' ? uploadEditor : recordEditor
   const file = editor.currentFile()
   if (!file) {
-    showToast('Select or record audio before transcribing.')
+    showToast(t('errors.selectAudio'))
     return
   }
 
@@ -595,7 +599,7 @@ $('#transcribe-form').addEventListener('submit', async (event) => {
   button.disabled = true
   $('#transcript-output').textContent = ''
   $('#response-output').textContent = ''
-  setStatus('Transcribing')
+  setStatus(t('status.transcribing'))
   const started = performance.now()
   try {
     const response = await fetch('/v1/audio/transcriptions', { method: 'POST', body: form })
@@ -605,9 +609,12 @@ $('#transcribe-form').addEventListener('submit', async (event) => {
     try { payload = JSON.parse(responseText) } catch {}
     $('#transcript-output').textContent = typeof payload === 'string' ? payload : payload.text || ''
     $('#response-output').textContent = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)
-    setStatus(`HTTP ${response.status} in ${((performance.now() - started) / 1000).toFixed(3)}s`, 'success')
+    setStatus(t('status.httpComplete', {
+      status: response.status,
+      seconds: ((performance.now() - started) / 1000).toFixed(3),
+    }), 'success')
   } catch (error) {
-    setStatus('Transcription failed', 'error')
+    setStatus(t('status.transcriptionFailed'), 'error')
     showToast(errorMessage(error))
   } finally {
     button.disabled = false
@@ -633,21 +640,23 @@ function setRealtimeButton(recording, busy = false) {
   $('#realtime-device').disabled = recording || busy
   $('#realtime-device-refresh').disabled = recording || busy
   if (changed) button.innerHTML = recording
-    ? '<i class="icon-square"></i> Stop and finalize'
-    : '<span class="record-dot"></span> Start'
+    ? `<i class="icon-square"></i> ${t('realtime.stop')}`
+    : `<span class="record-dot"></span> ${t('realtime.start')}`
 }
 
 const realtime = new RealtimeRecorder({
   canvas: $('#realtime-wave'),
-  onState: (value) => {
+  onState: (stateCode, details = {}) => {
+    const key = `realtime.${details.time ? 'recordingTime' : stateCode}`
+    const value = t(key, details)
     $('#realtime-state').textContent = value
-    setStatus(value, value === 'Finalized' ? 'success' : 'neutral')
-    if (value === 'Recording' || value.startsWith('Recording ')) setRealtimeButton(true)
-    if (value === 'Ready' || value === 'Finalized') setRealtimeButton(false)
+    setStatus(value, stateCode === 'finalized' ? 'success' : 'neutral')
+    if (stateCode === 'recording') setRealtimeButton(true)
+    if (stateCode === 'ready' || stateCode === 'finalized') setRealtimeButton(false)
   },
   onTranscript: (text, language, final) => {
     $('#realtime-output').textContent = text
-    $('#realtime-language').textContent = language || 'Auto detection'
+    $('#realtime-language').textContent = language ? languageLabel(language) : t('realtime.autoDetection')
     $('#realtime-final').hidden = !final
   },
   onError: (error) => showToast(errorMessage(error)),
@@ -712,7 +721,7 @@ async function fetchJson(path, options) {
 }
 
 async function refreshApiStatus() {
-  $('#api-output').textContent = 'Loading...'
+  $('#api-output').textContent = t('api.loading')
   const paths = ['/health', '/v1/models', '/v1/audio/supported_languages', '/metrics/inference']
   const values = await Promise.all(paths.map(async (path) => {
     try { return [path, await fetchJson(path)] } catch (error) { return [path, { error: errorMessage(error) }] }
@@ -780,7 +789,7 @@ $('#realtime-defaults-save').addEventListener('click', async (event) => {
       }),
     })
     applyRealtimeDefaults(settings.realtime_defaults)
-    showToast('Realtime defaults saved to persistent storage.', 'success')
+    showToast(t('system.defaultsSaved'), 'success')
   } catch (error) {
     showToast(errorMessage(error))
   } finally {
@@ -792,16 +801,16 @@ function renderAlignerSettings(aligner) {
   if (!aligner) return
   const badge = $('#aligner-status-badge')
   const labels = {
-    unavailable: 'Unavailable',
-    unloaded: 'Not loaded',
-    loading: 'Loading…',
-    loaded: aligner.load_always ? 'Loaded · persistent' : 'Loaded · on demand',
-    unloading: 'Releasing…',
-    error: 'Load failed',
+    unavailable: t('aligner.unavailable'),
+    unloaded: t('aligner.notLoaded'),
+    loading: t('aligner.loading'),
+    loaded: aligner.load_always ? t('aligner.loadedPersistent') : t('aligner.loadedOnDemand'),
+    unloading: t('aligner.releasing'),
+    error: t('aligner.loadFailed'),
   }
   badge.dataset.state = aligner.status || 'unavailable'
   badge.textContent = labels[aligner.status] || aligner.status
-  $('#aligner-model-name').textContent = aligner.model || 'No forced-aligner model configured'
+  $('#aligner-model-name').textContent = aligner.model || t('aligner.noModel')
   $('#aligner-load-always').checked = aligner.load_always === true
   setAlignerBusy(state.alignerBusy)
 }
@@ -828,7 +837,7 @@ $('#aligner-load-always').addEventListener('change', async (event) => {
       persistUiSession()
     }
     updateTimestampAvailability(aligner)
-    showToast(enabled ? 'Aligner will remain loaded across restarts.' : 'Persistent aligner loading disabled and VRAM released.', 'success')
+    showToast(enabled ? t('aligner.persistEnabled') : t('aligner.persistDisabled'), 'success')
   } catch (error) {
     event.currentTarget.checked = !enabled
     showToast(errorMessage(error))
@@ -856,7 +865,7 @@ $('#aligner-unload-now').addEventListener('click', async () => {
     syncTimestampSelectionUi()
     persistUiSession()
     updateTimestampAvailability(aligner)
-    showToast('Forced aligner released from VRAM.', 'success')
+    showToast(t('aligner.released'), 'success')
   } catch (error) {
     showToast(errorMessage(error))
     await refreshAlignerSettings().catch(() => {})
@@ -968,10 +977,10 @@ function attachGpuChartHover(plot, samples, metric, now) {
     }, null)
     const tolerance = Math.max(1500, state.gpuWindowMs * 10 / Math.max(1, bounds.width))
     const hasSample = nearest && Math.abs(nearest.timestamp - targetTime) <= tolerance
-    const shownTime = new Date(hasSample ? nearest.timestamp : targetTime).toLocaleTimeString()
+    const shownTime = new Date(hasSample ? nearest.timestamp : targetTime).toLocaleTimeString(browserLanguage())
     tooltip.textContent = hasSample
       ? `${formatGpuMetric(metric, nearest[metric.key])} / ${shownTime}`
-      : `No sample / ${shownTime}`
+      : `${t('gpu.noSample')} / ${shownTime}`
     const percent = ratio * 100
     line.style.left = `${percent}%`
     tooltip.style.left = `${percent}%`
@@ -1007,7 +1016,11 @@ function createGpuMetricChart(metric, gpu, history, now) {
   svg.setAttribute('preserveAspectRatio', 'none')
   svg.setAttribute(
     'aria-label',
-    `${metric.label} history, average ${formatGpuMetric(metric, average)}, peak ${formatGpuMetric(metric, peak)}`,
+    t('gpu.historyAria', {
+      metric: metric.label,
+      average: formatGpuMetric(metric, average),
+      peak: formatGpuMetric(metric, peak),
+    }),
   )
   svg.setAttribute('role', 'img')
   addGpuChartGrid(svg, 300, 70)
@@ -1039,8 +1052,11 @@ function createGpuMetricChart(metric, gpu, history, now) {
   attachGpuChartHover(plot, samples, metric, now)
   const chartAxis = element('div', 'gpu-chart-axis')
   chartAxis.append(
-    element('span', '', state.gpuWindowMs === 60 * 1000 ? '1 min' : '10 min'),
-    element('span', '', `Avg ${formatGpuMetric(metric, average)} / Peak ${formatGpuMetric(metric, peak)}`),
+    element('span', '', state.gpuWindowMs === 60 * 1000 ? t('gpu.oneMinute') : t('gpu.tenMinutes')),
+    element('span', '', t('gpu.averagePeak', {
+      average: formatGpuMetric(metric, average),
+      peak: formatGpuMetric(metric, peak),
+    })),
   )
   chart.append(chartScale, plot, chartAxis)
   return chart
@@ -1052,8 +1068,8 @@ function renderGpuMonitor(gpus) {
   const heading = element('div', 'gpu-monitor-heading')
   const windowControl = element('div', 'gpu-window-control')
   windowControl.setAttribute('role', 'group')
-  windowControl.setAttribute('aria-label', 'GPU history window')
-  const historyWindows = [[60 * 1000, '1 min'], [10 * 60 * 1000, '10 min']]
+  windowControl.setAttribute('aria-label', t('gpu.historyWindow'))
+  const historyWindows = [[60 * 1000, t('gpu.oneMinute')], [10 * 60 * 1000, t('gpu.tenMinutes')]]
   historyWindows.forEach(([windowMs, label]) => {
     const button = element('button', windowMs === state.gpuWindowMs ? 'active' : '', label)
     button.type = 'button'
@@ -1065,11 +1081,11 @@ function renderGpuMonitor(gpus) {
     })
     windowControl.append(button)
   })
-  heading.append(element('div', 'gpu-monitor-title', 'GPU Monitor'), windowControl)
+  heading.append(element('div', 'gpu-monitor-title', t('gpu.monitor')), windowControl)
   monitor.append(heading)
 
   if (!gpus.length) {
-    monitor.append(element('div', 'gpu-monitor-muted', 'nvidia-smi unavailable'))
+    monitor.append(element('div', 'gpu-monitor-muted', t('gpu.unavailable')))
     output.replaceChildren(monitor)
     return
   }
@@ -1088,12 +1104,12 @@ function renderGpuMonitor(gpus) {
       if (chart) metrics.append(chart)
     })
     const details = element('div', 'gpu-live-details')
-    if (gpu.performance_state) details.append(element('span', '', `State ${gpu.performance_state}`))
+    if (gpu.performance_state) details.append(element('span', '', t('gpu.state', { state: gpu.performance_state })))
     if (Number.isFinite(gpu.pcie_generation) && Number.isFinite(gpu.pcie_width)) {
-      details.append(element('span', '', `PCIe Gen ${gpu.pcie_generation} x${gpu.pcie_width}`))
+      details.append(element('span', '', t('gpu.pcie', { generation: gpu.pcie_generation, width: gpu.pcie_width })))
     }
     if (Number.isFinite(gpu.power_limit)) {
-      details.append(element('span', '', `Power limit ${Math.round(gpu.power_limit)} W`))
+      details.append(element('span', '', t('gpu.powerLimit', { power: Math.round(gpu.power_limit) })))
     }
     card.append(cardHead, metrics, details)
     grid.append(card)
@@ -1151,18 +1167,18 @@ async function pollReadiness() {
     }
     await restoreTimestampSession()
     badge.dataset.state = state.backendReady ? 'ready' : 'starting'
-    badge.querySelector('strong').textContent = state.backendReady ? 'Inference ready' : 'Inference starting'
+    badge.querySelector('strong').textContent = state.backendReady ? t('runtime.ready') : t('runtime.starting')
     model.textContent = readiness.model || 'Qwen3-ASR'
     badge.title = readiness.model || 'Qwen3-ASR'
-    if (state.backendReady && $('#global-status').textContent === 'Connecting to inference') {
-      setStatus('Ready', 'success')
+    if (state.backendReady && $('#global-status').textContent === t('status.connecting')) {
+      setStatus(t('status.ready'), 'success')
     }
   } catch {
     state.backendReady = false
     badge.dataset.state = 'starting'
-    badge.querySelector('strong').textContent = 'Inference starting'
-    model.textContent = 'Waiting for inference service'
-    badge.title = 'Waiting for inference service'
+    badge.querySelector('strong').textContent = t('runtime.starting')
+    model.textContent = t('runtime.waiting')
+    badge.title = t('runtime.waiting')
   }
   setTimeout(pollReadiness, state.backendReady ? 15000 : 3000)
 }

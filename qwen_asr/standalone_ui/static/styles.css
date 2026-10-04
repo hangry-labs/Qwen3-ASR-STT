@@ -25,6 +25,7 @@ button, input, select, textarea { font: inherit; letter-spacing: 0; }
 button, select { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }
 [hidden] { display: none !important; }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 
 .brand-hero {
   position: relative;
@@ -59,6 +60,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .brand-links .primary-link { position: relative; overflow: hidden; border-color: #ff8b3d; background: linear-gradient(135deg, #ff7110, #ff9e52); box-shadow: inset 0 1px 0 rgba(255, 232, 211, 0.4), 0 10px 26px rgba(255, 92, 0, 0.23); color: #1d0c03; }
 .brand-links .primary-link i { color: #321307; }
 .brand-links .primary-link:hover { border-color: #ffb17b; background: linear-gradient(135deg, #ff842d, #ffb16f); box-shadow: inset 0 1px 0 rgba(255, 241, 228, 0.48), 0 13px 30px rgba(255, 92, 0, 0.34); color: #160802; }
+.locale-picker { flex: 0 0 auto; }
+.locale-picker select { width: auto; min-width: 108px; min-height: 40px; padding: 0 30px 0 11px; border-color: rgba(255, 255, 255, 0.24); border-radius: 9px; background-color: rgba(10, 11, 13, 0.76); color: #fff4eb; font-size: 0.78rem; font-weight: 700; backdrop-filter: blur(12px); }
+.locale-picker select:hover { border-color: rgba(255, 154, 85, 0.72); background-color: rgba(35, 23, 17, 0.9); }
 .brand-copy { position: absolute; top: 22px; left: 50%; display: block; width: min(580px, calc(100% - 112px)); margin: 0; text-align: center; transform: translateX(calc(-50% - 58px)); }
 .brand-copy h1 { display: block; width: 100%; margin: 0; line-height: 0; }
 .product-logo { display: block; width: 100%; height: auto; margin: 0 auto; filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.3)); }
@@ -321,6 +325,7 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .labs-badge { width: 104px; height: 35px; }
   .brand-links { max-width: 218px; gap: 7px; }
   .brand-links a { min-height: 35px; padding: 0 10px; font-size: 0.73rem; }
+  .locale-picker select { min-width: 102px; min-height: 35px; font-size: 0.72rem; }
   .brand-copy { margin-top: 22px; }
   .runtime-badge { grid-template-columns: auto minmax(0, 1fr) auto; width: 100%; }
   .runtime-version { grid-column: auto; align-self: stretch; padding: 0 0 0 10px; border-top: 0; border-left: 1px solid rgba(255, 255, 255, 0.1); }
@@ -330,6 +335,7 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   html[data-header-collapsed="true"] .brand-hero .labs-badge { width: 90px; height: 30px; }
   html[data-header-collapsed="true"] .brand-hero .brand-links { width: 100%; max-width: none; }
   html[data-header-collapsed="true"] .brand-hero .brand-links a { min-height: 32px; padding: 0 8px; font-size: 0.7rem; }
+  html[data-header-collapsed="true"] .brand-hero .locale-picker select { min-height: 32px; }
   html[data-header-collapsed="true"] .brand-hero .runtime-badge { grid-template-columns: auto minmax(0, 1fr) auto; width: 100%; padding: 8px 10px; }
   html[data-header-collapsed="true"] .brand-hero .runtime-copy span { display: block; max-width: 100%; }
   html[data-header-collapsed="true"] .brand-hero .runtime-version { grid-column: auto; align-self: stretch; padding: 0 0 0 10px; border-top: 0; border-left: 1px solid rgba(255, 255, 255, 0.1); }
