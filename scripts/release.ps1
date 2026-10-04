@@ -57,14 +57,12 @@ function Get-VersionHistoryDockerSection {
         "**Standard image**",
         "",
         '```bash',
-        "docker volume create qwen3_asr_stt_data",
         "docker run --name qwen3-asr-stt-v$containerVersion --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$standardTag",
         '```',
         "",
         "**Tiny image**",
         "",
         '```bash',
-        "docker volume create qwen3_asr_stt_data",
         "docker run --name qwen3-asr-stt-v$containerVersion-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$tinyTag",
         '```'
     ) -join $LineEnding
@@ -316,7 +314,9 @@ Invoke-Step "Push main and $releaseTag atomically" {
 
 if (Test-Enabled $DryRun) {
     Write-Host "Dry run complete. No files, commits, tags, or remote refs were changed."
+    Write-Host "The public GitHub Release entry remains a manual step after tagged deployment validation."
 } else {
     Write-Host "Release workflow complete. main and $releaseTag were pushed atomically."
     Write-Host "GitHub Actions is responsible for publishing the release images."
+    Write-Host "After validating the tagged deployment, create the public GitHub Release entry manually."
 }

@@ -32,12 +32,10 @@ Listen to real multilingual test recordings on the [Qwen3-ASR-STT examples page]
 Run the full baked image with NVIDIA GPU support:
 
 ```bash
-docker volume create qwen3_asr_stt_data
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
+
+Commands in this document are intentionally kept on one line so they can be copied into Bash, PowerShell, or Windows Command Prompt without shell-specific line-continuation syntax. Docker creates the named `qwen3_asr_stt_data` volume automatically when it does not already exist.
 
 The identical image is available from GitHub Container Registry as `ghcr.io/hangry-labs/qwen3-asr-stt:latest`. Replace the Docker Hub image name in any command with `ghcr.io/hangry-labs/qwen3-asr-stt` to use GHCR.
 
@@ -68,13 +66,7 @@ No network access is required after pulling the full image. A fresh named volume
 The tiny image keeps runtime dependencies but does not bake model assets. Use it when you want a smaller image and a unified persistent product volume that warms on first online use:
 
 ```bash
-docker volume create qwen3_asr_stt_data
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e HF_HUB_OFFLINE=0 \
-  -e TRANSFORMERS_OFFLINE=0 \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest_tiny
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
 ## Image Tags
@@ -133,40 +125,25 @@ Supported request fields:
 ### cURL
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "response_format=json"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "response_format=json"
 ```
 
 Force a language when you know it:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "language=English" \
-  -F "response_format=verbose_json"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "language=English" -F "response_format=verbose_json"
 ```
 
 Request exact word and segment timestamps:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "response_format=verbose_json" \
-  -F "timestamp_granularities[]=word" \
-  -F "timestamp_granularities[]=segment"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "response_format=verbose_json" -F "timestamp_granularities[]=word" -F "timestamp_granularities[]=segment"
 ```
 
 Text response:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "response_format=text"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "response_format=text"
 ```
 
 When `language` is omitted, the service keeps Qwen3-ASR in model-native auto-language mode. The Whisper component in this image is the Qwen audio feature extractor, not a separate language detector that can be enabled or disabled.
@@ -319,12 +296,7 @@ Inference is serialized through one owner because the offline vLLM API is synchr
 For the 1.7B model, increase the memory/context profile:
 
 ```bash
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e HF_HUB_OFFLINE=1 \
-  -e TRANSFORMERS_OFFLINE=1 \
-  -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B-hf \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B-hf hangrylabs/qwen3-asr-stt:latest
 ```
 
 Decoding temperature is intentionally fixed at `0` for deterministic transcription. Do not increase it for normal STT use.
@@ -336,15 +308,7 @@ The single `qwen3_asr_stt_data` volume stores downloaded/baked model assets, vLL
 If you used the legacy cache/settings volumes, run this once before retiring them to carry their contents into the unified layout without downloading the models again:
 
 ```bash
-docker volume create qwen3_asr_stt_data
-docker run --rm --entrypoint sh \
-  -v qwen3_asr_stt_hf_cache:/legacy/huggingface:ro \
-  -v qwen3_asr_stt_torch_compile_cache:/legacy/torchinductor:ro \
-  -v qwen3_asr_stt_vllm_cache:/legacy/vllm:ro \
-  -v qwen3_asr_stt_settings:/legacy/settings:ro \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest_tiny \
-  -c 'mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app && cp -an /legacy/huggingface/. /app/persistent/models/huggingface/ && cp -an /legacy/torchinductor/. /app/persistent/cache/torchinductor/ && cp -an /legacy/vllm/. /app/persistent/cache/vllm/ && cp -an /legacy/settings/. /app/persistent/app/'
+docker run --rm --entrypoint sh -v qwen3_asr_stt_hf_cache:/legacy/huggingface:ro -v qwen3_asr_stt_torch_compile_cache:/legacy/torchinductor:ro -v qwen3_asr_stt_vllm_cache:/legacy/vllm:ro -v qwen3_asr_stt_settings:/legacy/settings:ro -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny -c "mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app && cp -an /legacy/huggingface/. /app/persistent/models/huggingface/ && cp -an /legacy/torchinductor/. /app/persistent/cache/torchinductor/ && cp -an /legacy/vllm/. /app/persistent/cache/vllm/ && cp -an /legacy/settings/. /app/persistent/app/"
 ```
 
 The old volumes are left untouched. Remove them only after confirming the new container is healthy.
@@ -352,12 +316,7 @@ The old volumes are left untouched. Remove them only after confirming the new co
 To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
 
 ```bash
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem \
-  -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem \
-  -v /path/to/certs:/certs:ro \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem -v /absolute/path/to/certs:/certs:ro hangrylabs/qwen3-asr-stt:latest
 ```
 
 ## Local Development
@@ -423,7 +382,7 @@ task release DRY_RUN=1
 task release
 ```
 
-The release task requires a snapshot `VERSION` such as `1.0-snapshot`, validates package metadata, Python compilation, CodeQL results, and Dockerfile structure, and converts it into the annotated `v1.0` release tag. It then prepares the next minor snapshot and README history section before atomically pushing `main` and the release tag to `origin`. GitHub Actions publishes identical full and tiny images to Docker Hub and GHCR. Pass an explicit newer `NEXT_VERSION=X.Y-snapshot` to override the default next-minor snapshot, or use `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing rolling image separately before release when dependency-backed or runtime verification is required.
+The release task requires a snapshot `VERSION` such as `1.0-snapshot`, validates package metadata, Python compilation, CodeQL results, and Dockerfile structure, and converts it into the annotated `v1.0` release tag. It then prepares the next minor snapshot and README history section before atomically pushing `main` and the release tag to `origin`. GitHub Actions publishes identical full and tiny images to Docker Hub and GHCR. Creating the public GitHub Release entry remains an intentional manual step: first deploy and validate the immutable version tag, then publish its release entry. This preserves the option to correct a tag before making the irreversible public release announcement. Pass an explicit newer `NEXT_VERSION=X.Y-snapshot` to override the default next-minor snapshot, or use `SKIP_VALIDATION=1` only when the same release commit has already passed the lightweight validation sequence. Test the existing rolling image separately before release when dependency-backed or runtime verification is required.
 
 Stop containers:
 
@@ -474,20 +433,19 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Unified full and tiny publishing in one Buildx job so both variants reuse the same dependency graph without loading either image into the runner's Docker store. Model prefetch now depends only on its focused downloader code and build arguments, and baked assets occupy an independent final-image layer, allowing unrelated UI/API changes to reuse both the downloads and the large model layer.
 - Added complete browser UI localization for English, Polish, Japanese, Chinese, Spanish, and German. Official locale routes (`/en`, `/pl`, `/ja`, `/zh`, `/es`, and `/de`) provide stable guide links, while the root page defaults to English and remembers each browser's selected language.
 - Added a responsive, dependency-free GitHub Pages showcase with playable repository audio, reference transcripts, native-language filters, and self-contained localization for all 30 supported transcription languages. Selecting a language now filters its recording and localizes the page automatically, while the browser UI links to the matching language directly.
+- Made public Docker and API commands single-line for direct use in Bash, PowerShell, and Windows Command Prompt, documented the provenance of generated audio fixtures, and kept GitHub Release publication as an explicit manual gate after tagged deployment validation.
 
 The current development snapshot is published through the rolling tags from `main`:
 
 **Standard image**
 
 ```bash
-docker volume create qwen3_asr_stt_data
 docker run --name qwen3-asr-stt-v1-0 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
 
 **Tiny image**
 
 ```bash
-docker volume create qwen3_asr_stt_data
 docker run --name qwen3-asr-stt-v1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
@@ -518,7 +476,6 @@ docker run --name qwen3-asr-stt-v0-2-0 --restart unless-stopped -p 8000:8000 --g
 **Tiny image**
 
 ```bash
-docker volume create qwen3_asr_stt_v0_2_0_hf_cache
 docker run --name qwen3-asr-stt-v0-2-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_2_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.2.0_tiny
 ```
 
@@ -555,7 +512,6 @@ docker run --name qwen3-asr-stt-v0-1-0 --restart unless-stopped -p 8000:8000 --g
 **Tiny image**
 
 ```bash
-docker volume create qwen3_asr_stt_v0_1_0_hf_cache
 docker run --name qwen3-asr-stt-v0-1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_1_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.1.0_tiny
 ```
 

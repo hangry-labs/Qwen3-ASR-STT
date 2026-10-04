@@ -46,12 +46,10 @@ Remote file upload and API calls work over normal LAN HTTP when the port is expo
 Run with NVIDIA GPU support:
 
 ```bash
-docker volume create qwen3_asr_stt_data
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
+
+Commands in this document are intentionally kept on one line so they can be copied into Bash, PowerShell, or Windows Command Prompt without shell-specific line-continuation syntax. Docker creates the named `qwen3_asr_stt_data` volume automatically when it does not already exist.
 
 Then open the UI:
 
@@ -76,13 +74,7 @@ http://localhost:8000/docs
 Use `latest_tiny` when you want runtime dependencies but prefer model assets to live in a persistent cache volume:
 
 ```bash
-docker volume create qwen3_asr_stt_data
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e HF_HUB_OFFLINE=0 \
-  -e TRANSFORMERS_OFFLINE=0 \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest_tiny
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
 The tiny image downloads model assets on first online use, then reuses the mounted data volume across later image tags.
@@ -105,21 +97,13 @@ The stable integration endpoint is `POST /v1/audio/transcriptions`, tested with 
 Transcribe an audio file:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "response_format=json"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "response_format=json"
 ```
 
 Request exact timestamps:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "response_format=verbose_json" \
-  -F "timestamp_granularities[]=word" \
-  -F "timestamp_granularities[]=segment"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "response_format=verbose_json" -F "timestamp_granularities[]=word" -F "timestamp_granularities[]=segment"
 ```
 
 `verbose_json` includes detected language, audio duration, and a coarse whole-audio segment without alignment. Requested word/segment timestamps use the forced aligner. `srt` and `vtt` automatically request accurate segment alignment instead of generating placeholder timings. Timestamp granularities require `response_format=verbose_json`.
@@ -129,11 +113,7 @@ Temperature is intentionally fixed at `0`: both backends use deterministic greed
 Force a language when needed:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -F "file=@sample.mp3" \
-  -F "model=qwen3-asr" \
-  -F "language=English" \
-  -F "response_format=verbose_json"
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "language=English" -F "response_format=verbose_json"
 ```
 
 When `language` is omitted, Qwen3-ASR performs model-native language identification. The Whisper component in the image is the Qwen audio feature extractor, not a separate language detector switch.
@@ -194,12 +174,7 @@ The full `latest` image also bakes `Qwen/Qwen3-ASR-1.7B-hf` and `Qwen/Qwen3-Forc
 Run the larger 1.7B model:
 
 ```bash
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e HF_HUB_OFFLINE=1 \
-  -e TRANSFORMERS_OFFLINE=1 \
-  -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B-hf \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -e QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B-hf hangrylabs/qwen3-asr-stt:latest
 ```
 
 Each container starts the browser UI and OpenAI-compatible API together on port 8000.
@@ -207,11 +182,7 @@ Each container starts the browser UI and OpenAI-compatible API together on port 
 Selecting timestamps in the UI or requesting `timestamp_granularities` loads the forced aligner on demand. Its first compiled load increased observed VRAM use by approximately 3.3 GiB on an RTX 5070 Ti; releasing it immediately returned about 1.8 GiB, while CUDA/compiler context remained cached until restart. Exact behavior varies by GPU, driver, and runtime settings. The browser forces `verbose_json` while timestamps are selected and releases the aligner after both timestamp options remain unchecked for 60 seconds. System can release it immediately or keep it loaded. To use always-loaded behavior as the initial default when no saved preference exists:
 
 ```bash
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e QWEN_ASR_ENABLE_ALIGNER=1 \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e QWEN_ASR_ENABLE_ALIGNER=1 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
 
 The single Qwen aligner supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. Other ASR languages, including Turkish, remain transcribable but cannot produce Qwen forced-alignment timestamps. Japanese alignment includes its required tokenizer. Korean transcription is supported, but Korean timestamp alignment is not packaged to avoid adding its GPLv3-only optional tokenizer to the Apache-2.0 image. Unsupported or unavailable forced-language requests return HTTP 422 before loading the aligner. The System tab also persists the default chunk interval, maximum audio window, and transcript-stability values for new realtime sessions.
@@ -259,15 +230,7 @@ The single `qwen3_asr_stt_data` volume stores model assets, vLLM and TorchInduct
 Existing users can migrate the legacy cache/settings volumes once without downloading models again:
 
 ```bash
-docker volume create qwen3_asr_stt_data
-docker run --rm --entrypoint sh \
-  -v qwen3_asr_stt_hf_cache:/legacy/huggingface:ro \
-  -v qwen3_asr_stt_torch_compile_cache:/legacy/torchinductor:ro \
-  -v qwen3_asr_stt_vllm_cache:/legacy/vllm:ro \
-  -v qwen3_asr_stt_settings:/legacy/settings:ro \
-  -v qwen3_asr_stt_data:/app/persistent \
-  hangrylabs/qwen3-asr-stt:latest_tiny \
-  -c 'mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app && cp -an /legacy/huggingface/. /app/persistent/models/huggingface/ && cp -an /legacy/torchinductor/. /app/persistent/cache/torchinductor/ && cp -an /legacy/vllm/. /app/persistent/cache/vllm/ && cp -an /legacy/settings/. /app/persistent/app/'
+docker run --rm --entrypoint sh -v qwen3_asr_stt_hf_cache:/legacy/huggingface:ro -v qwen3_asr_stt_torch_compile_cache:/legacy/torchinductor:ro -v qwen3_asr_stt_vllm_cache:/legacy/vllm:ro -v qwen3_asr_stt_settings:/legacy/settings:ro -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny -c "mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app && cp -an /legacy/huggingface/. /app/persistent/models/huggingface/ && cp -an /legacy/torchinductor/. /app/persistent/cache/torchinductor/ && cp -an /legacy/vllm/. /app/persistent/cache/vllm/ && cp -an /legacy/settings/. /app/persistent/app/"
 ```
 
 The old volumes remain untouched; delete them only after the new container is healthy.
@@ -275,12 +238,7 @@ The old volumes remain untouched; delete them only after the new container is he
 To use browser microphone recording from another machine, mount a trusted certificate and start the server with HTTPS:
 
 ```bash
-docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all \
-  -e CUDA_VISIBLE_DEVICES=0 \
-  -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem \
-  -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem \
-  -v /path/to/certs:/certs:ro \
-  hangrylabs/qwen3-asr-stt:latest
+docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem -v /absolute/path/to/certs:/certs:ro hangrylabs/qwen3-asr-stt:latest
 ```
 
 ## Responsible Use and Privacy
