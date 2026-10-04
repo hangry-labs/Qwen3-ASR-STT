@@ -234,12 +234,16 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .aligner-status-badge[data-state="loaded"] { border-color: #397b58; color: #a7e6c3; }
 .aligner-status-badge[data-state="loading"], .aligner-status-badge[data-state="unloading"] { border-color: #956038; color: #ffca9f; }
 .aligner-status-badge[data-state="error"] { border-color: #7f3d43; color: #ffc2c6; }
+.runtime-status-badge { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 0.67rem; font-weight: 700; white-space: nowrap; }
+.runtime-status-badge[data-state="enabled"] { border-color: #397b58; color: #a7e6c3; }
 .aligner-settings-actions { display: grid; align-content: center; gap: 12px; }
 .runtime-settings-card { margin: 14px 0 18px; padding: 16px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
 .runtime-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .runtime-settings-heading > div { display: flex; align-items: center; gap: 8px; }
 .runtime-settings-heading i { color: var(--accent); }
 .runtime-settings-card > p { margin: 9px 0 4px; color: var(--muted); font-size: 0.76rem; line-height: 1.5; }
+.runtime-settings-card > .switch-field { margin-top: 14px; }
+.runtime-settings-card > .aligner-model-name { display: block; margin-top: 12px; }
 .switch-field { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .switch-field > span { display: grid; gap: 4px; }
 .switch-field strong { font-size: 0.78rem; }

@@ -50,6 +50,16 @@ class AlignerRuntimeTests(unittest.TestCase):
                     }
                 )
 
+    def test_mcp_setting_is_disabled_by_default_and_persisted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            store = RuntimeSettingsStore(path)
+
+            self.assertFalse(store.mcp_enabled())
+            store.set_mcp_enabled(True)
+
+            self.assertTrue(RuntimeSettingsStore(path).mcp_enabled())
+
     def test_legacy_realtime_defaults_gain_bounded_window_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "settings.json"

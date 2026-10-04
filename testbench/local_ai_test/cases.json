@@ -1,0 +1,168 @@
+[
+  {
+    "id": "health",
+    "prompt": "Check the deployment health. Report whether inference is ready, the loaded model, current GPU name and VRAM usage, and whether the forced aligner is loaded.",
+    "expected_tools": ["get_health"],
+    "exact_tool_sequence": true,
+    "expected_outcomes": ["success"],
+    "final_contains_any": ["ready", "ok", "model"]
+  },
+  {
+    "id": "mounted_auto",
+    "prompt": "Transcribe the mounted file english-01.mp3. Detect its language automatically and give me the transcript.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {"file_path": {"equals": "english-01.mp3"}}
+    ]
+  },
+  {
+    "id": "mounted_forced_with_prompt",
+    "prompt": "Transcribe english-01.mp3 as English. Use the context phrase Hangry Labs, but do not treat it as spoken text unless the audio supports it.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {
+        "file_path": {"equals": "english-01.mp3"},
+        "language": {"one_of": ["en", "English"]},
+        "prompt": {"contains": "Hangry Labs"}
+      }
+    ]
+  },
+  {
+    "id": "word_timestamps",
+    "prompt": "Transcribe english-01.mp3 in English and return word-level timestamps.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {
+        "file_path": {"equals": "english-01.mp3"},
+        "language": {"one_of": ["en", "English"]},
+        "timestamp_granularities": {"contains_item": "word"}
+      }
+    ]
+  },
+  {
+    "id": "segment_timestamps",
+    "prompt": "Transcribe japanese-01.mp3 as Japanese with segment timestamps.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {
+        "file_path": {"equals": "japanese-01.mp3"},
+        "language": {"one_of": ["ja", "Japanese"]},
+        "timestamp_granularities": {"contains_item": "segment"}
+      }
+    ]
+  },
+  {
+    "id": "path_reference_only",
+    "prompt": "Use the audio transcription capability on the shared file english-01.mp3. Pass only its path and do not try to embed or encode the audio in the tool call.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {"file_path": {"equals": "english-01.mp3"}}
+    ]
+  },
+  {
+    "id": "path_escape_error",
+    "prompt": "Transcribe ../secret.mp3. If the service refuses that path, explain the restriction and do not invent a transcript.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["error"],
+    "argument_rules": [
+      {"file_path": {"equals": "../secret.mp3"}}
+    ],
+    "expected_error_contains": ["inside the configured MCP input directory"],
+    "final_contains_any": ["directory", "outside", "path", "refused"]
+  },
+  {
+    "id": "missing_file_error",
+    "prompt": "Transcribe missing.mp3. If it is absent, say so clearly and do not fabricate any spoken words.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["error"],
+    "argument_rules": [
+      {"file_path": {"equals": "missing.mp3"}}
+    ],
+    "expected_error_contains": ["does not exist"],
+    "final_contains_any": ["missing", "does not exist", "not found", "absent"]
+  },
+  {
+    "id": "missing_file_recovery",
+    "prompt": "First try to transcribe missing.mp3. If and only if it is missing, retry with english-01.mp3 and return that transcript.",
+    "expected_tools": ["transcribe_audio_file", "transcribe_audio_file"],
+    "expected_outcomes": ["error", "success"],
+    "argument_rules": [
+      {"file_path": {"equals": "missing.mp3"}},
+      {"file_path": {"equals": "english-01.mp3"}}
+    ]
+  },
+  {
+    "id": "unsupported_timestamp_language",
+    "prompt": "Transcribe turkish-01.mp3 as Turkish and include word timestamps. If timestamp alignment is unsupported, explain that limitation and do not silently return a transcript without the requested timestamps.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["error"],
+    "argument_rules": [
+      {
+        "file_path": {"equals": "turkish-01.mp3"},
+        "language": {"one_of": ["tr", "Turkish"]},
+        "timestamp_granularities": {"contains_item": "word"}
+      }
+    ],
+    "expected_error_contains": ["does not support Turkish timestamps"],
+    "final_contains_any": ["Turkish", "timestamp", "aligner", "unsupported"]
+  },
+  {
+    "id": "unsupported_language",
+    "prompt": "Transcribe english-01.mp3 but force the language to Klingon. If that language is unsupported, report the error rather than guessing another language.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["error"],
+    "argument_rules": [
+      {
+        "file_path": {"equals": "english-01.mp3"},
+        "language": {"equals_casefold": "Klingon"}
+      }
+    ],
+    "expected_error_contains": ["Unsupported language"],
+    "final_contains_any": ["Klingon", "unsupported", "language"]
+  },
+  {
+    "id": "realtime_defaults_control",
+    "prompt": "Set the saved realtime defaults to 1.5 second chunks, a 25 second stable window, 3 unfixed chunks, and 7 unfixed tokens. Confirm the stored values.",
+    "expected_tools": ["configure_realtime_defaults"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {
+        "chunk_size_sec": {"equals": 1.5},
+        "max_window_sec": {"equals": 25},
+        "unfixed_chunk_num": {"equals": 3},
+        "unfixed_token_num": {"equals": 7}
+      }
+    ]
+  },
+  {
+    "id": "aligner_residency_roundtrip",
+    "prompt": "Enable the saved always-loaded forced-aligner setting, then disable it again so the aligner VRAM is released. Confirm the final state is not loaded and not persistent.",
+    "expected_tools": ["configure_aligner_residency", "configure_aligner_residency"],
+    "expected_outcomes": ["success", "success"],
+    "argument_rules": [
+      {"load_aligner_always": {"equals": true}},
+      {"load_aligner_always": {"equals": false}}
+    ]
+  },
+  {
+    "id": "release_aligner_vram",
+    "prompt": "Release the optional forced aligner from VRAM now. Do not unload the main transcription model.",
+    "expected_tools": ["release_forced_aligner_vram"],
+    "exact_tool_sequence": true,
+    "expected_outcomes": ["success"],
+    "final_contains_any": ["released", "unloaded", "VRAM", "aligner"]
+  },
+  {
+    "id": "capability_first",
+    "prompt": "Before doing any transcription, inspect the service capabilities. I need word timestamps for Turkish. If Turkish timestamps are not supported, explain that and do not call a transcription tool.",
+    "expected_tools": ["get_health"],
+    "exact_tool_sequence": true,
+    "expected_outcomes": ["success"],
+    "final_contains_any": ["Turkish", "timestamp", "not supported", "unsupported"]
+  }
+]

@@ -23,6 +23,7 @@
 
 - 用于上传、录音和麦克风实时转录的本地浏览器界面
 - 兼容 OpenAI 的 `/v1/audio/transcriptions` 端点
+- 位于 `/mcp` 的可选 Streamable HTTP MCP 服务器，支持健康检查、共享路径转录和系统控制
 - 多语言转录和自动语言检测
 - 可选的单词级和片段级时间戳
 - GPU 监控和持久化设置
@@ -44,6 +45,9 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 - 浏览器界面：[http://localhost:8000](http://localhost:8000)
 - API 文档：[http://localhost:8000/docs](http://localhost:8000/docs)
+- MCP 服务器：[http://localhost:8000/mcp](http://localhost:8000/mcp)
+
+请先在“系统”选项卡中启用 **MCP 连接**，并且仅在受信任的私有网络中使用。
 
 完整的 `latest` 镜像已包含模型，下载镜像后即可离线使用。默认模型为 `Qwen/Qwen3-ASR-0.6B-hf`。
 

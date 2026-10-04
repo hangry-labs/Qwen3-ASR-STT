@@ -23,6 +23,7 @@
 
 - ファイルのアップロード、録音、マイク音声のリアルタイム文字起こしに対応したローカル UI
 - OpenAI 互換の `/v1/audio/transcriptions` エンドポイント
+- 状態確認、共有パスからの文字起こし、システム制御に対応した `/mcp` のオプション Streamable HTTP MCP サーバー
 - 多言語文字起こしと自動言語検出
 - 単語およびセグメント単位のオプションのタイムスタンプ
 - GPU モニタリングと永続化される設定
@@ -44,6 +45,9 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 - ブラウザー UI: [http://localhost:8000](http://localhost:8000)
 - API ドキュメント: [http://localhost:8000/docs](http://localhost:8000/docs)
+- MCP サーバー: [http://localhost:8000/mcp](http://localhost:8000/mcp)
+
+最初にシステムタブで **MCP接続** を有効にし、信頼できるプライベートネットワーク内でのみ使用してください。
 
 フル版の `latest` イメージにはモデルが含まれており、イメージの取得後はオフラインで使用できます。既定のモデルは `Qwen/Qwen3-ASR-0.6B-hf` です。
 

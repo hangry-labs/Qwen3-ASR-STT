@@ -49,6 +49,8 @@ function Get-VersionHistoryDockerSection {
     )
 
     $containerVersion = $Version.Replace(".", "-")
+    $standardContainer = if ($Rolling) { "qwen3-asr-stt" } else { "qwen3-asr-stt-v$containerVersion" }
+    $tinyContainer = if ($Rolling) { "qwen3-asr-stt-tiny" } else { "qwen3-asr-stt-v$containerVersion-tiny" }
     $standardTag = if ($Rolling) { "latest" } else { "v$Version" }
     $tinyTag = if ($Rolling) { "latest_tiny" } else { "v${Version}_tiny" }
     return @(
@@ -57,13 +59,13 @@ function Get-VersionHistoryDockerSection {
         "**Standard image**",
         "",
         '```bash',
-        "docker run --name qwen3-asr-stt-v$containerVersion --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$standardTag",
+        "docker run --name $standardContainer --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$standardTag",
         '```',
         "",
         "**Tiny image**",
         "",
         '```bash',
-        "docker run --name qwen3-asr-stt-v$containerVersion-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$tinyTag",
+        "docker run --name $tinyContainer --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:$tinyTag",
         '```'
     ) -join $LineEnding
 }

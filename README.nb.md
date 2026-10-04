@@ -23,6 +23,7 @@ Denne Hangry Labs-versjonen er laget for lokal inferens. Du kan starte én conta
 
 - Lokalt nettlesergrensesnitt for opplasting, opptak og direktetranskripsjon fra mikrofon
 - OpenAI-kompatibelt endepunkt: `/v1/audio/transcriptions`
+- Valgfri Streamable HTTP MCP-server på `/mcp` med helsestatus, transkripsjon fra delte filbaner og systemkontroller
 - Flerspråklig transkripsjon og automatisk språkregistrering
 - Valgfrie tidsstempler på ord- og segmentnivå
 - GPU-overvåking og vedvarende innstillinger
@@ -44,6 +45,9 @@ Kommandoen står på én linje og kan limes direkte inn i Bash, PowerShell eller
 
 - Nettlesergrensesnitt: [http://localhost:8000](http://localhost:8000)
 - API-dokumentasjon: [http://localhost:8000/docs](http://localhost:8000/docs)
+- MCP-server: [http://localhost:8000/mcp](http://localhost:8000/mcp)
+
+Aktiver først **MCP-tilkobling** i System-fanen, og bruk den bare på et betrodd privat nettverk.
 
 Det komplette `latest`-bildet inkluderer modellene og kan brukes uten nett etter at bildet er lastet ned. Standardmodellen er `Qwen/Qwen3-ASR-0.6B-hf`.
 

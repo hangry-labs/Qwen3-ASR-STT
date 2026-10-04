@@ -9,6 +9,7 @@ import re
 import tempfile
 import time
 import uuid
+from collections.abc import Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ from qwen_asr.server.api_contracts import (
     TRANSCRIPTION_OPENAPI_EXTRA,
     TRANSCRIPTION_RESPONSES,
     AlignerSettingsUpdate,
+    MCPSettingsUpdate,
     ModelListResponse,
     ModelObject,
     RealtimeSessionCreateRequest,
@@ -209,15 +211,19 @@ def _form_list(form: Any, name: str) -> list[str]:
     return out
 
 
-def _upload_suffix(upload: UploadFile | StarletteUploadFile) -> str:
-    suffix = Path(upload.filename or "").suffix.lower()
+def _audio_suffix(filename: str | None, content_type: str | None) -> str:
+    suffix = Path(filename or "").suffix.lower()
     if re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
         return suffix
-    content_type = str(upload.content_type or "").split(";", 1)[0].strip().lower()
-    inferred = SUPPORTED_AUDIO_CONTENT_TYPES.get(content_type)
+    normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    inferred = SUPPORTED_AUDIO_CONTENT_TYPES.get(normalized_content_type)
     if inferred:
         return inferred
     return ".audio"
+
+
+def _upload_suffix(upload: UploadFile | StarletteUploadFile) -> str:
+    return _audio_suffix(upload.filename, upload.content_type)
 
 
 async def _read_upload(
@@ -540,6 +546,89 @@ def _inference_http_exception(exc: InferenceUnavailableError) -> HTTPException:
     )
 
 
+@dataclass
+class TranscriptionService:
+    """One transcription boundary shared by HTTP, MCP, and future adapters."""
+
+    asr: ASRRuntime
+    coordinator: InferenceCoordinator
+    max_upload_bytes: int
+    ensure_aligner_loaded: Callable[[], Awaitable[dict[str, Any]]]
+    timestamp_language_error: Callable[[str | None], str | None]
+    trace_requests: bool = False
+
+    async def transcribe_bytes(
+        self,
+        *,
+        payload: bytes,
+        filename: str | None,
+        content_type: str | None = None,
+        language: str | None = None,
+        prompt: str = "",
+        timestamp_granularities: Iterable[str] = (),
+    ) -> Any:
+        readiness = await self.coordinator.snapshot()
+        if readiness["status"] != "ok":
+            raise _inference_http_exception(InferenceUnavailableError(readiness["reason"] or "degraded"))
+
+        if not payload:
+            raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
+        if len(payload) > self.max_upload_bytes:
+            limit_mb = self.max_upload_bytes / (1024 * 1024)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Uploaded audio exceeds the configured {limit_mb:g} MB limit.",
+            )
+
+        forced_language = None
+        if language and language.strip():
+            try:
+                forced_language = _normalize_openai_language(language)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        granularities = _validate_timestamp_granularities(timestamp_granularities)
+        return_time_stamps = bool(granularities)
+        if return_time_stamps:
+            language_error = self.timestamp_language_error(forced_language)
+            if language_error:
+                raise HTTPException(status_code=422, detail=language_error)
+            await self.ensure_aligner_loaded()
+
+        suffix = _audio_suffix(filename, content_type)
+        with (
+            optional_timer("write uploaded audio temp file", self.trace_requests),
+            tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp,
+        ):
+            tmp.write(payload)
+            tmp_path = tmp.name
+
+        try:
+            try:
+                with optional_timer("run ASR transcription", self.trace_requests):
+                    result = await self.coordinator.run(
+                        "ordinary",
+                        self.asr.transcribe,
+                        audio=tmp_path,
+                        context=prompt,
+                        language=forced_language,
+                        return_time_stamps=return_time_stamps,
+                        language_mode="forced" if forced_language else "auto",
+                    )
+            except InferenceUnavailableError as exc:
+                raise _inference_http_exception(exc) from exc
+            except ImportError as exc:
+                raise HTTPException(status_code=422, detail=_alignment_dependency_message(exc)) from exc
+            except ValueError as exc:
+                if return_time_stamps and "not supported by the forced aligner" in str(exc):
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+                raise HTTPException(status_code=400, detail=f"Audio could not be transcribed: {exc}") from exc
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        return result[0]
+
+
 def create_app(
     *,
     asr: ASRRuntime,
@@ -600,6 +689,13 @@ def create_app(
     runtime_settings = getattr(aligner_runtime, "settings", None) or RuntimeSettingsStore(
         os.getenv("QWEN_ASR_SETTINGS_PATH", DEFAULT_SETTINGS_PATH)
     )
+    mcp_default_enabled = os.getenv("QWEN_ASR_ENABLE_MCP", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
 
     def session_diagnostics() -> dict[str, Any]:
         now = time.monotonic()
@@ -746,6 +842,8 @@ def create_app(
     app.state.inference_coordinator = coordinator
     app.state.realtime_sessions = realtime_sessions
     app.state.aligner_runtime = aligner_runtime
+    app.state.runtime_settings = runtime_settings
+    app.state.mcp_default_enabled = mcp_default_enabled
 
     def aligner_snapshot() -> dict[str, Any]:
         if aligner_runtime is not None:
@@ -804,6 +902,56 @@ def create_app(
                 detail=f"Forced aligner could not be loaded: {type(exc).__name__}: {exc}",
             ) from exc
 
+    async def release_aligner_runtime() -> dict[str, Any]:
+        if aligner_runtime is None:
+            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
+        if aligner_runtime.load_always:
+            raise HTTPException(
+                status_code=409,
+                detail="Disable 'Always keep aligner loaded' before unloading it.",
+            )
+        try:
+            return await coordinator.run(
+                "aligner_unload",
+                aligner_runtime.unload,
+                language_mode="alignment",
+                deadline_seconds=aligner_load_timeout,
+            )
+        except InferenceUnavailableError as exc:
+            raise _inference_http_exception(exc) from exc
+
+    async def configure_aligner_runtime(enabled: bool) -> dict[str, Any]:
+        if aligner_runtime is None:
+            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
+        if enabled:
+            await ensure_aligner_loaded()
+            try:
+                aligner_runtime.set_load_always(True)
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
+            return aligner_runtime.snapshot()
+
+        try:
+            aligner_runtime.set_load_always(False)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
+        return await release_aligner_runtime()
+
+    transcription_service = TranscriptionService(
+        asr=asr,
+        coordinator=coordinator,
+        max_upload_bytes=upload_limit,
+        ensure_aligner_loaded=ensure_aligner_loaded,
+        timestamp_language_error=timestamp_language_error,
+        trace_requests=trace_requests,
+    )
+    app.state.transcription_service = transcription_service
+    app.state.model_name = model_name
+    app.state.aligner_snapshot = aligner_snapshot
+    app.state.ensure_aligner_loaded = ensure_aligner_loaded
+    app.state.release_aligner = release_aligner_runtime
+    app.state.configure_aligner = configure_aligner_runtime
+
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         return _openai_http_exception(exc)
@@ -858,7 +1006,28 @@ def create_app(
 
     @app.get("/system/settings", tags=["System"])
     def system_settings() -> Dict[str, Any]:
-        return {"realtime_defaults": runtime_settings.realtime_defaults()}
+        return {
+            "realtime_defaults": runtime_settings.realtime_defaults(),
+            "mcp": {
+                "enabled": runtime_settings.mcp_enabled(default=mcp_default_enabled),
+                "endpoint": "/mcp",
+                "input_directory": str(getattr(app.state, "mcp_input_directory", "") or "") or None,
+            },
+        }
+
+    @app.put("/system/settings/mcp", tags=["System"], responses=ERROR_RESPONSES)
+    async def configure_mcp(settings: MCPSettingsUpdate) -> Dict[str, Any]:
+        try:
+            runtime_settings.set_mcp_enabled(settings.enabled)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
+        return {
+            "mcp": {
+                "enabled": runtime_settings.mcp_enabled(default=mcp_default_enabled),
+                "endpoint": "/mcp",
+                "input_directory": str(getattr(app.state, "mcp_input_directory", "") or "") or None,
+            }
+        }
 
     @app.put("/system/settings/realtime", tags=["System"], responses=ERROR_RESPONSES)
     async def configure_realtime_defaults(settings: RealtimeSettingsUpdate) -> Dict[str, Any]:
@@ -876,49 +1045,11 @@ def create_app(
 
     @app.post("/system/aligner/unload", tags=["System"], responses=ERROR_RESPONSES)
     async def unload_aligner() -> Dict[str, Any]:
-        if aligner_runtime is None:
-            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
-        if aligner_runtime.load_always:
-            raise HTTPException(
-                status_code=409,
-                detail="Disable 'Always keep aligner loaded' before unloading it.",
-            )
-        try:
-            return await coordinator.run(
-                "aligner_unload",
-                aligner_runtime.unload,
-                language_mode="alignment",
-                deadline_seconds=aligner_load_timeout,
-            )
-        except InferenceUnavailableError as exc:
-            raise _inference_http_exception(exc) from exc
+        return await release_aligner_runtime()
 
     @app.put("/system/aligner", tags=["System"], responses=ERROR_RESPONSES)
     async def configure_aligner(settings: AlignerSettingsUpdate) -> Dict[str, Any]:
-        if aligner_runtime is None:
-            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
-        enabled = settings.load_aligner_always
-
-        if enabled:
-            await ensure_aligner_loaded()
-            try:
-                aligner_runtime.set_load_always(True)
-            except OSError as exc:
-                raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
-            return aligner_runtime.snapshot()
-
-        try:
-            aligner_runtime.set_load_always(False)
-            return await coordinator.run(
-                "aligner_unload",
-                aligner_runtime.unload,
-                language_mode="alignment",
-                deadline_seconds=aligner_load_timeout,
-            )
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"Runtime setting could not be saved: {exc}") from exc
-        except InferenceUnavailableError as exc:
-            raise _inference_http_exception(exc) from exc
+        return await configure_aligner_runtime(settings.load_aligner_always)
 
     @app.get(
         "/v1/models",
@@ -977,15 +1108,13 @@ def create_app(
                 raise HTTPException(status_code=400, detail="Missing required multipart file field: file")
 
             try:
-                suffix = _upload_suffix(upload)
                 model = _form_string(form, "model")
                 _validate_model(model, model_name)
 
-                forced_language = None
                 language = _form_string(form, "language")
                 if language.strip():
                     try:
-                        forced_language = _normalize_openai_language(language)
+                        _normalize_openai_language(language)
                     except ValueError as exc:
                         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1014,45 +1143,14 @@ def create_app(
             effective_timestamp_granularities = list(timestamp_granularities)
             if response_format in {"srt", "vtt"}:
                 effective_timestamp_granularities = ["segment"]
-            return_time_stamps = bool(effective_timestamp_granularities)
-            if return_time_stamps:
-                language_error = timestamp_language_error(forced_language)
-                if language_error:
-                    raise HTTPException(status_code=422, detail=language_error)
-                await ensure_aligner_loaded()
-
-            with optional_timer("write uploaded audio temp file", trace_requests):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    tmp.write(payload)
-                    tmp_path = tmp.name
-
-            try:
-                try:
-                    with optional_timer("run ASR transcription", trace_requests):
-                        result = await coordinator.run(
-                            "ordinary",
-                            asr.transcribe,
-                            audio=tmp_path,
-                            context=prompt,
-                            language=forced_language,
-                            return_time_stamps=return_time_stamps,
-                            language_mode="forced" if forced_language else "auto",
-                        )
-                except InferenceUnavailableError as exc:
-                    raise _inference_http_exception(exc) from exc
-                except ImportError as exc:
-                    raise HTTPException(
-                        status_code=422,
-                        detail=_alignment_dependency_message(exc),
-                    ) from exc
-                except ValueError as exc:
-                    if return_time_stamps and "not supported by the forced aligner" in str(exc):
-                        raise HTTPException(status_code=422, detail=str(exc)) from exc
-                    raise HTTPException(status_code=400, detail=f"Audio could not be transcribed: {exc}") from exc
-            finally:
-                Path(tmp_path).unlink(missing_ok=True)
-
-            item = result[0]
+            item = await transcription_service.transcribe_bytes(
+                payload=payload,
+                filename=upload.filename,
+                content_type=upload.content_type,
+                language=language,
+                prompt=prompt,
+                timestamp_granularities=effective_timestamp_granularities,
+            )
             if stream:
                 return _stream_response(item)
             return _json_response(

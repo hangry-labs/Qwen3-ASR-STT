@@ -79,3 +79,7 @@ task benchmark-audio-robustness
 ```
 
 The runner writes the machine-readable latest result to `testbench/results/robustness-latest.json` and the human-readable history and case details under `benchmarks/robustness/`. Use `--strict-exit` only when every case is expected to pass; the baseline intentionally preserves known model-native failures so later model or dependency upgrades can be compared without silently changing silence or weak-speech behavior.
+
+## Local chat-model MCP regression
+
+[`local_ai_test/`](local_ai_test/README.md) contains a separate integration harness for testing whether a local OpenAI-compatible chat model can discover and call the live MCP health, path-transcription, and runtime-control tools. It covers correct selection and arguments, timestamp requests, persisted settings, aligner lifecycle, path errors, unsupported capabilities, and explicit retry recovery. Its machine-readable latest result stays under the ignored `testbench/results/` directory so local endpoint details and model responses are not committed.

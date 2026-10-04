@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from qwen_asr.server.aligner_runtime import AlignerRuntime, RuntimeSettingsStore
 from qwen_asr.server.contracts import ASRRuntime
+from qwen_asr.server.mcp_server import attach_mcp
 from qwen_asr.server.openai_api import create_app as create_openai_app
 from qwen_asr.server.startup_warmup import run_aligner_warmup, run_startup_warmup
 from qwen_asr.standalone_ui.server import attach_ui
@@ -62,6 +63,7 @@ def create_product_app(
         startup_warmup=lambda: run_startup_warmup(asr),
         aligner_runtime=aligner_runtime,
     )
+    attach_mcp(api_app=api_app)
     return attach_ui(api_app=api_app)
 
 

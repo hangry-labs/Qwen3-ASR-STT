@@ -553,6 +553,23 @@ class OpenAIApiTests(unittest.TestCase):
             self.assertEqual(saved.status_code, 200)
             self.assertEqual(client.get("/system/settings").json()["realtime_defaults"], saved.json()["realtime_defaults"])
 
+    def test_mcp_setting_can_be_persisted_and_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            asr = FakeASR()
+            settings = RuntimeSettingsStore(Path(directory) / "settings.json")
+            client = _managed_client(asr, FakeAlignerRuntime(asr, settings))
+
+            initial = client.get("/system/settings")
+            saved = client.put(
+                "/system/settings/mcp",
+                json={"enabled": True, "client_extension": "ignored"},
+            )
+
+            self.assertFalse(initial.json()["mcp"]["enabled"])
+            self.assertTrue(saved.json()["mcp"]["enabled"])
+            self.assertTrue(client.get("/system/settings").json()["mcp"]["enabled"])
+            self.assertTrue(RuntimeSettingsStore(settings.path).mcp_enabled())
+
     def test_segment_timestamps_split_on_punctuation_and_silence(self):
         result = FakeResult(
             text="Hello world. Another thought after a pause",

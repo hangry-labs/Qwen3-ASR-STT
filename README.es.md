@@ -23,6 +23,7 @@ Esta versión de Hangry Labs está diseñada para inferencia local. Inicia un so
 
 - Interfaz web local para subir archivos, grabar y transcribir el micrófono en tiempo real
 - Endpoint `/v1/audio/transcriptions` compatible con OpenAI
+- Servidor MCP Streamable HTTP opcional en `/mcp` para agentes, con estado, transcripción mediante rutas compartidas y controles del sistema
 - Transcripción multilingüe y detección automática del idioma
 - Marcas de tiempo opcionales por palabra y segmento
 - Supervisión de la GPU y ajustes persistentes
@@ -44,6 +45,9 @@ Después, abre:
 
 - Interfaz web: [http://localhost:8000](http://localhost:8000)
 - Documentación de la API: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Servidor MCP: [http://localhost:8000/mcp](http://localhost:8000/mcp)
+
+Activa primero **Conectividad MCP** en la pestaña Sistema y úsala únicamente en una red privada de confianza.
 
 La imagen completa `latest` incluye los modelos y puede utilizarse sin conexión después de descargarla. El modelo predeterminado es `Qwen/Qwen3-ASR-0.6B-hf`.
 

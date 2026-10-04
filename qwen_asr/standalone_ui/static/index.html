@@ -197,6 +197,18 @@
                 </div>
               </div>
             </section>
+            <section class="runtime-settings-card" aria-labelledby="mcp-settings-title">
+              <div class="runtime-settings-heading">
+                <div><i class="icon-share-2"></i><strong id="mcp-settings-title" data-i18n="mcp.title">MCP connectivity</strong></div>
+                <span class="runtime-status-badge" id="mcp-status-badge" data-state="disabled" data-i18n="mcp.disabled">Disabled</span>
+              </div>
+              <p data-i18n="mcp.description">Allow trusted AI agents to inspect deployment health, transcribe shared files, and use runtime controls. This is not authentication; keep the service on a trusted private network.</p>
+              <label class="switch-field" for="mcp-enabled">
+                <span><strong data-i18n="mcp.enable">Enable MCP endpoint</strong><small data-i18n="mcp.enableHelp">Persist access to /mcp across container restarts.</small></span>
+                <input id="mcp-enabled" type="checkbox" role="switch">
+              </label>
+              <span class="aligner-model-name" id="mcp-location" data-i18n="mcp.locationPending">Endpoint and shared file directory are being detected…</span>
+            </section>
             <section class="runtime-settings-card" aria-labelledby="realtime-defaults-title">
               <div class="runtime-settings-heading">
                 <div><i class="icon-sliders-horizontal"></i><strong id="realtime-defaults-title" data-i18n="system.realtimeDefaults">Realtime defaults</strong></div>

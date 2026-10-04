@@ -739,6 +739,7 @@ async function refreshSystem() {
     $('#readiness-output').textContent = JSON.stringify(readiness, null, 2)
     updateTimestampAvailability(aligner)
     applyRealtimeDefaults(settings.realtime_defaults, { includeStream: false })
+    applyMcpSettings(settings.mcp)
   } catch (error) {
     showToast(errorMessage(error))
   }
@@ -747,7 +748,40 @@ async function refreshSystem() {
 async function loadRuntimeSettings() {
   const settings = await fetchJson('/system/settings')
   applyRealtimeDefaults(settings.realtime_defaults)
+  applyMcpSettings(settings.mcp)
 }
+
+function applyMcpSettings(mcp) {
+  if (!mcp) return
+  const enabled = mcp.enabled === true
+  $('#mcp-enabled').checked = enabled
+  const badge = $('#mcp-status-badge')
+  badge.dataset.state = enabled ? 'enabled' : 'disabled'
+  badge.textContent = t(enabled ? 'mcp.enabled' : 'mcp.disabled')
+  $('#mcp-location').textContent = t('mcp.location', {
+    endpoint: mcp.endpoint || '/mcp',
+    directory: mcp.input_directory || t('mcp.noDirectory'),
+  })
+}
+
+$('#mcp-enabled').addEventListener('change', async (event) => {
+  const enabled = event.currentTarget.checked
+  event.currentTarget.disabled = true
+  try {
+    const settings = await fetchJson('/system/settings/mcp', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+    applyMcpSettings(settings.mcp)
+    showToast(t(enabled ? 'mcp.savedEnabled' : 'mcp.savedDisabled'), 'success')
+  } catch (error) {
+    event.currentTarget.checked = !enabled
+    showToast(errorMessage(error))
+  } finally {
+    event.currentTarget.disabled = false
+  }
+})
 
 function applyRealtimeDefaults(defaults, { includeStream = true } = {}) {
   if (!defaults) return

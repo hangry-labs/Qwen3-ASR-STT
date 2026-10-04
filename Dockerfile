@@ -91,6 +91,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS=120 \
     QWEN_ASR_REALTIME_SESSION_TTL_SECONDS=900 \
     QWEN_ASR_MAX_UPLOAD_MB=100 \
+    QWEN_ASR_ENABLE_MCP=0 \
+    QWEN_ASR_MCP_INPUT_DIR=/app/persistent/mcp-input \
+    QWEN_ASR_MCP_DNS_REBINDING_PROTECTION=1 \
     QWEN_ASR_RECYCLE_DELAY_SECONDS=2 \
     QWEN_ASR_WATCHDOG_ENABLED=1 \
     QWEN_ASR_WATCHDOG_INTERVAL_SECONDS=300 \
@@ -103,7 +106,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ffmpeg libsndfile1 \
-    && mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app \
+    && mkdir -p /app/persistent/models/huggingface /app/persistent/cache/torchinductor /app/persistent/cache/vllm /app/persistent/app /app/persistent/mcp-input \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8000

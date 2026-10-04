@@ -23,6 +23,7 @@ Ta wersja Hangry Labs została przygotowana do lokalnego wnioskowania. Uruchom j
 
 - Lokalny interfejs do przesyłania plików, nagrywania i transkrypcji mikrofonu w czasie rzeczywistym
 - Zgodny z OpenAI punkt końcowy `/v1/audio/transcriptions`
+- Opcjonalny serwer MCP Streamable HTTP pod `/mcp` ze stanem wdrożenia, transkrypcją ze współdzielonych ścieżek i kontrolą systemu
 - Wielojęzyczna transkrypcja i automatyczne rozpoznawanie języka
 - Opcjonalne znaczniki czasu dla słów i segmentów
 - Monitorowanie GPU i trwałe ustawienia
@@ -44,6 +45,9 @@ Następnie otwórz:
 
 - Interfejs przeglądarkowy: [http://localhost:8000](http://localhost:8000)
 - Dokumentację API: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Serwer MCP: [http://localhost:8000/mcp](http://localhost:8000/mcp)
+
+Najpierw włącz **Łączność MCP** na karcie System i używaj jej wyłącznie w zaufanej sieci prywatnej.
 
 Pełny obraz `latest` zawiera modele i po pobraniu może działać bez dostępu do sieci. Domyślnym modelem jest `Qwen/Qwen3-ASR-0.6B-hf`.
 

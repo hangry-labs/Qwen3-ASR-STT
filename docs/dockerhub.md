@@ -137,6 +137,18 @@ print(result.text)
 
 The local server does not authenticate the placeholder `api_key="local"`. Keep it on a trusted local/private network or add an authenticating reverse proxy. For loopback-only Docker access, publish with `-p 127.0.0.1:8000:8000`.
 
+## MCP
+
+Both image variants include opt-in stateless MCP Streamable HTTP at `http://localhost:8000/mcp`. Enable **MCP connectivity** in the System tab on a trusted deployment first. It runs inside the same process and shares the loaded model, inference queue, upload limit, GPU monitor, settings, and on-demand aligner with the UI and REST API.
+
+`get_health` reports the deployment, inference metrics, aligner, realtime defaults, current GPU telemetry, storage, and shared directory. `transcribe_audio_file` accepts optional language, prompt/context, and timestamps but is confined to `/app/persistent/mcp-input` by default. Runtime controls can persist aligner residency and realtime defaults, load the aligner, or release its VRAM. Make a file available with:
+
+```bash
+docker cp sample.mp3 qwen3-asr-stt:/app/persistent/mcp-input/sample.mp3
+```
+
+Set `QWEN_ASR_MCP_INPUT_DIR` to another mounted container directory or to an empty value to omit the transcription tool. The default directory is created automatically for existing persistent volumes. MCP accepts path references only; base64 arguments and arbitrary URL fetching are intentionally unsupported. Localhost is accepted by the MCP DNS-rebinding guard by default; add exact comma-separated LAN or reverse-proxy host values with `QWEN_ASR_MCP_ALLOWED_HOSTS`, and origins for clients that send an `Origin` header with `QWEN_ASR_MCP_ALLOWED_ORIGINS`. While disabled, MCP returns `403 Forbidden` because its use has not been authorized by the deployment owner. The enable switch prevents accidental exposure but is not an authentication system.
+
 Useful routes:
 
 - `GET /health` (readiness-compatible alias)
@@ -158,6 +170,7 @@ Useful routes:
 - `POST /v1/realtime/transcriptions/sessions/{session_id}/audio`
 - `POST /v1/realtime/transcriptions/sessions/{session_id}/finish`
 - `DELETE /v1/realtime/transcriptions/sessions/{session_id}`
+- `POST /mcp` (MCP Streamable HTTP)
 
 `stream=true` on the file endpoint returns OpenAI-compatible `transcript.text.delta` and `transcript.text.done` SSE events after completed-file inference. The realtime session API used by the Stream tab is different: it accepts audio progressively, repeatedly decodes a configurable recent-audio window, and retains older stable transcript text outside the prompt. This produces live updates while recording and prevents inference latency and context from growing without bound, but its HTTP session protocol is not the OpenAI Realtime WebSocket protocol.
 
@@ -213,13 +226,18 @@ Common knobs:
 - `QWEN_ASR_INFERENCE_TIMEOUT_SECONDS=120`
 - `QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS=120`
 - `QWEN_ASR_REALTIME_SESSION_TTL_SECONDS=900`
+- `QWEN_ASR_ENABLE_MCP=0`
+- `QWEN_ASR_MCP_INPUT_DIR=/app/persistent/mcp-input`
+- `QWEN_ASR_MCP_DNS_REBINDING_PROTECTION=1`
+- `QWEN_ASR_MCP_ALLOWED_HOSTS=127.0.0.1:*,localhost:*,[::1]:*,host.docker.internal:*`
+- `QWEN_ASR_MCP_ALLOWED_ORIGINS=http://127.0.0.1:*,http://localhost:*,https://127.0.0.1:*,https://localhost:*`
 - `QWEN_ASR_WATCHDOG_ENABLED=1`
 - `QWEN_ASR_WATCHDOG_INTERVAL_SECONDS=300`
 - `QWEN_ASR_WATCHDOG_TIMEOUT_SECONDS=60`
 - `QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem`
 - `QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem`
 
-The System tab persists `load_aligner_always` plus the realtime `chunk_size_sec`, `max_window_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. `max_window_sec` accepts 10â€“60 seconds and defaults to 30. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
+The System tab persists `mcp_enabled`, `load_aligner_always`, and the realtime `chunk_size_sec`, `max_window_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. `max_window_sec` accepts 10â€“60 seconds and defaults to 30. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
 
 Startup warmup intentionally makes `/health` wait until vLLM compilation, CUDA graph capture, and three representative decode passes have stabilized the normal generation path. The first API transcription after readiness therefore does not pay lazy initialization cost.
 

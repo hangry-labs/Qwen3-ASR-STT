@@ -18,6 +18,7 @@ class ProductApplicationTests(unittest.TestCase):
 
         with (
             patch("qwen_asr.server.application.create_openai_app", return_value=api_app) as create_api,
+            patch("qwen_asr.server.application.attach_mcp", return_value=api_app) as attach_mcp,
             patch("qwen_asr.server.application.attach_ui", return_value=product_app) as attach_ui,
         ):
             result = create_product_app(
@@ -33,6 +34,7 @@ class ProductApplicationTests(unittest.TestCase):
         self.assertEqual(create_api.call_args.kwargs["model_name"], "Qwen/test-model")
         self.assertEqual(create_api.call_args.kwargs["concurrency"], 2)
         self.assertTrue(create_api.call_args.kwargs["trace_requests"])
+        attach_mcp.assert_called_once_with(api_app=api_app)
         attach_ui.assert_called_once_with(api_app=api_app)
 
     def test_model_kwargs_coerce_torch_dtype_without_mutating_input(self) -> None:

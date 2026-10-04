@@ -7,8 +7,9 @@ import os
 import tempfile
 import threading
 import traceback
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from qwen_asr.server.contracts import ASRRuntime
 from qwen_asr.startup_logging import log_startup
@@ -17,6 +18,7 @@ from qwen_asr.startup_logging import log_startup
 DEFAULT_SETTINGS_PATH = "/app/persistent/app/settings.json"
 LOAD_ALWAYS_KEY = "load_aligner_always"
 REALTIME_DEFAULTS_KEY = "realtime_defaults"
+MCP_ENABLED_KEY = "mcp_enabled"
 DEFAULT_REALTIME_SETTINGS = {
     "chunk_size_sec": 2.0,
     "max_window_sec": 30.0,
@@ -109,6 +111,10 @@ class RuntimeSettingsStore:
             defaults["unfixed_token_num"] = unfixed_tokens
         return defaults
 
+    def mcp_enabled(self, *, default: bool = False) -> bool:
+        value = self.snapshot().get(MCP_ENABLED_KEY, default)
+        return value if isinstance(value, bool) else default
+
     def set_realtime_defaults(self, values: dict[str, Any]) -> dict[str, float | int]:
         chunk_size = values.get("chunk_size_sec")
         max_window = values.get("max_window_sec")
@@ -132,6 +138,9 @@ class RuntimeSettingsStore:
         }
         self._update(REALTIME_DEFAULTS_KEY, normalized)
         return normalized
+
+    def set_mcp_enabled(self, enabled: bool) -> None:
+        self._update(MCP_ENABLED_KEY, bool(enabled))
 
     def _update(self, key: str, value: Any) -> None:
         with self._lock:

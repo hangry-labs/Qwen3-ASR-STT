@@ -128,6 +128,10 @@ class AlignerSettingsUpdate(PermissiveRequestModel):
     load_aligner_always: bool
 
 
+class MCPSettingsUpdate(PermissiveRequestModel):
+    enabled: bool
+
+
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": OpenAIErrorResponse, "description": "Invalid request"},
     413: {"model": OpenAIErrorResponse, "description": "Uploaded audio exceeds the configured limit"},
