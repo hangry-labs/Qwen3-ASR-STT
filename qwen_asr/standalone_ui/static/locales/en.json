@@ -2,6 +2,7 @@
   "app.title": "Qwen3-ASR-STT",
   "brand.mascotAlt": "Qwen3-ASR-STT mascot",
   "brand.productAlt": "Qwen3-ASR-STT - Local Speech-to-Text, Browser UI, and API",
+  "brand.poweredBy": "Powered by",
   "nav.aria": "Application links",
   "nav.examples": "Examples",
   "nav.apiDocs": "API docs",

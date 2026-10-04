@@ -2,6 +2,7 @@
   "app.title": "Qwen3-ASR-STT",
   "brand.mascotAlt": "Qwen3-ASR-STT 吉祥物",
   "brand.productAlt": "Qwen3-ASR-STT — 本地语音转文字、浏览器界面和 API",
+  "brand.poweredBy": "技术支持",
   "nav.aria": "应用链接",
   "nav.examples": "示例",
   "nav.apiDocs": "API 文档",

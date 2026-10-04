@@ -2,6 +2,7 @@
   "app.title": "Qwen3-ASR-STT",
   "brand.mascotAlt": "Qwen3-ASR-STT-Maskottchen",
   "brand.productAlt": "Qwen3-ASR-STT – lokale Spracherkennung, Browser-Oberfläche und API",
+  "brand.poweredBy": "Bereitgestellt von",
   "nav.aria": "Anwendungslinks",
   "nav.examples": "Beispiele",
   "nav.apiDocs": "API-Dokumentation",

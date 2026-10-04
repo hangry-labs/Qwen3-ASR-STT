@@ -27,7 +27,7 @@ FROM base AS app-builder
 
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md VERSION /app/
 COPY qwen_asr /app/qwen_asr
-COPY assets/qwen3_asr_favicon.webp assets/qwen3_asr_logo_horizontal.webp assets/hangrylabs_logo_horizontal.webp /app/assets/
+COPY assets/qwen3_asr_favicon.webp assets/qwen3_asr_logo_horizontal.webp assets/hangrylabs_logo.webp /app/assets/
 COPY testbench /app/testbench
 
 RUN python -m pip install -e . --no-deps

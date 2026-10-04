@@ -2,6 +2,7 @@
   "app.title": "Qwen3-ASR-STT",
   "brand.mascotAlt": "Mascota de Qwen3-ASR-STT",
   "brand.productAlt": "Qwen3-ASR-STT — Conversión local de voz a texto, interfaz web y API",
+  "brand.poweredBy": "Desarrollado por",
   "nav.aria": "Enlaces de la aplicación",
   "nav.examples": "Ejemplos",
   "nav.apiDocs": "Documentación de la API",

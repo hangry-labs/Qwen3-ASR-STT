@@ -24,7 +24,7 @@ button, select, input[type="range"] { cursor: pointer; }
 
 #shapes { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; }
 .page-shell { position: relative; z-index: 1; min-height: 100vh; background: rgba(0, 0, 0, 0.46); }
-.page-shell::before { position: fixed; inset: 0; z-index: -1; content: ""; pointer-events: none; opacity: 0.25; background: linear-gradient(180deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.88)), url("../assets/hero_background.webp") center top / cover no-repeat; }
+.page-shell::before { position: fixed; inset: 0; z-index: -1; content: ""; pointer-events: none; opacity: 0.22; background: linear-gradient(180deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.9)), url("../assets/hangrylabs_badge.webp") center top / min(900px, 100vw) auto no-repeat; }
 .page-content { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 18px 0 42px; }
 
 .hero { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.72fr); align-items: start; gap: 32px; padding-bottom: 32px; }
