@@ -5,12 +5,12 @@
 </p>
 
 <p align="center">
-  <strong>English</strong> Ã‚Â·
-  <a href="README.nb.md">Norsk bokmÃƒÂ¥l</a> Ã‚Â·
-  <a href="README.pl.md">Polski</a> Ã‚Â·
-  <a href="README.ja.md">Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾</a> Ã‚Â·
-  <a href="README.zh.md">Ã§Â®â‚¬Ã¤Â½â€œÃ¤Â¸Â­Ã¦â€“â€¡</a> Ã‚Â·
-  <a href="README.es.md">EspaÃƒÂ±ol</a>
+  <strong>English</strong> ·
+  <a href="README.nb.md">Norsk bokmål</a> ·
+  <a href="README.pl.md">Polski</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.zh.md">简体中文</a> ·
+  <a href="README.es.md">Español</a>
 </p>
 
 # Hangry Labs Qwen3-ASR-STT
