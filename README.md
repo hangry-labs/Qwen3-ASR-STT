@@ -5,12 +5,12 @@
 </p>
 
 <p align="center">
-  <strong>English</strong> Â·
-  <a href="README.nb.md">Norsk bokmÃ¥l</a> Â·
-  <a href="README.pl.md">Polski</a> Â·
-  <a href="README.ja.md">æ—¥æœ¬èªž</a> Â·
-  <a href="README.zh.md">ç®€ä½“ä¸­æ–‡</a> Â·
-  <a href="README.es.md">EspaÃ±ol</a>
+  <strong>English</strong> Ã‚Â·
+  <a href="README.nb.md">Norsk bokmÃƒÂ¥l</a> Ã‚Â·
+  <a href="README.pl.md">Polski</a> Ã‚Â·
+  <a href="README.ja.md">Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾</a> Ã‚Â·
+  <a href="README.zh.md">Ã§Â®â‚¬Ã¤Â½â€œÃ¤Â¸Â­Ã¦â€“â€¡</a> Ã‚Â·
+  <a href="README.es.md">EspaÃƒÂ±ol</a>
 </p>
 
 # Hangry Labs Qwen3-ASR-STT
@@ -235,7 +235,7 @@ Optional forced aligner asset:
 Qwen/Qwen3-ForcedAligner-0.6B-hf
 ```
 
-The forced aligner is not loaded by default. Its first compiled load increased observed VRAM use by approximately 3.3 GiB on an RTX 5070 Ti; releasing it immediately returned about 1.8 GiB, while CUDA/compiler context remained cached until restart. Exact behavior varies by GPU, driver, and runtime settings. Selecting Word or Segment in the browserâ€”or requesting `timestamp_granularities` through the APIâ€”loads it on demand. The browser forces `verbose_json` while timestamps are selected and schedules the aligner for release after both options remain unchecked for 60 seconds. The System tab can release it immediately or keep it loaded persistently. To make startup loading the initial default when no saved preference exists, use:
+The forced aligner is not loaded by default. Its first compiled load increased observed VRAM use by approximately 3.3 GiB on an RTX 5070 Ti; releasing it immediately returned about 1.8 GiB, while CUDA/compiler context remained cached until restart. Exact behavior varies by GPU, driver, and runtime settings. Selecting Word or Segment in the browserÃ¢â‚¬â€or requesting `timestamp_granularities` through the APIÃ¢â‚¬â€loads it on demand. The browser forces `verbose_json` while timestamps are selected and schedules the aligner for release after both options remain unchecked for 60 seconds. The System tab can release it immediately or keep it loaded persistently. To make startup loading the initial default when no saved preference exists, use:
 
 ```bash
 -e QWEN_ASR_ENABLE_ALIGNER=1
@@ -422,12 +422,30 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 
 ## Version History
 
+### v1.1 Snapshot
+
+- No changes yet.
+
+The current development snapshot is published through the rolling tags from `main`:
+
+**Standard image**
+
+```bash
+docker run --name qwen3-asr-stt-v1-1 --restart unless-stopped -p 8000:8000 --gpus all -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
+```
+
+**Tiny image**
+
+```bash
+docker run --name qwen3-asr-stt-v1-1-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
+```
+
 ### v1.0
 
 - Hardened the public API contract for OpenAI-client integrations while retaining its convenient permissive behavior: documented multipart and realtime schemas in `/docs`, made the single loaded model optional to specify, added model registration timestamps, completed unaligned `verbose_json` metadata, made SRT/VTT use real forced alignment, enforced timestamp-format rules, added tested AAC support and a configurable 100 MB upload limit, normalized unexpected failures, grouped custom and compatible routes, and added a live OpenAI Python client contract regression.
 - Added persistent and on-demand forced-aligner lifecycle management. Word or Segment selection can load the aligner without restarting, while the System tab can release its VRAM or keep it loaded across container replacements through the unified product data volume. Segment output is now divided into punctuation-, silence-, and duration-aware cues instead of one whole-file block.
 - Added Japanese word/segment alignment support to the image, capability-aware timestamp language validation, automatic idle aligner release, forced `verbose_json` timestamp output, actionable language-tokenizer errors, persistent realtime defaults, and one unified data volume for model assets, compiler caches, and application settings across releases.
-- Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Refreshed the WebP Hangry Labs artwork across the UI, examples, and 404 page; added a localized, linked â€œPowered by Hangry Labsâ€ signature; and placed the Hangry Labs logo immediately left of the Qwen mascot in the compact header. Reduced the vendored Lucide font to the glyphs used by the workspace.
+- Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Refreshed the WebP Hangry Labs artwork across the UI, examples, and 404 page; added a localized, linked Ã¢â‚¬Å“Powered by Hangry LabsÃ¢â‚¬Â signature; and placed the Hangry Labs logo immediately left of the Qwen mascot in the compact header. Reduced the vendored Lucide font to the glyphs used by the workspace.
 - Refined microphone workflows with automatic example loading, single-button record/stop controls for both recorded and realtime audio, responsive recording waveforms, aligned device refresh controls, and clearer recording status placement.
 - Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration. The System layout now keeps operational controls in the narrower left column while the wider GPU monitor remains at the top right.
 - Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
@@ -435,7 +453,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Polished forced-alignment workflows with timestamp choice restoration during ordinary page refreshes, automatic removal of incompatible examples, live load-completion feedback, tokenizer preloading, and dynamic-shape compilation to avoid first-use recompilation when audio or alignment language changes.
 - Replaced quadratic forced-aligner timestamp repair with a stable O(N log N) implementation based on upstream PR [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215), preserving existing anchors and interpolation results.
 - Reproduced zero-duration lexical timestamps from [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) and added a model-score-aware constrained decoder fallback that preserves ordinary alignment output while resolving affected words into positive, monotonic spans.
-- Profiled the cumulative realtime path from [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199), reproduced 4.8Ã— latency growth and a 74-second model-context failure, and replaced unbounded accumulation with a configurable stable rolling audio/transcript window. A 120-second regression now completes with a 30-second inference cap and stable post-window update latency.
+- Profiled the cumulative realtime path from [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199), reproduced 4.8Ãƒâ€” latency growth and a 74-second model-context failure, and replaced unbounded accumulation with a configurable stable rolling audio/transcript window. A 120-second regression now completes with a 30-second inference cap and stable post-window update latency.
 - Added a deterministic 44-case audio robustness benchmark for [QwenLM/Qwen3-ASR#165](https://github.com/QwenLM/Qwen3-ASR/issues/165), covering silence, synthetic noise, hum, echo, and weak speech in automatic and forced-language modes. The 0.6B baseline produced no false positives for 10 automatic-language non-speech cases but hallucinated text for 18 of 20 forced-language cases; clean speech remained accurate at 1% amplitude. The runtime intentionally preserves model-native silence handling instead of adding VAD or energy gating that could alter streaming, alignment, quiet-speech, or training-data workflows.
 - Reproduced the prompt/context leakage reported in [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186): forced-language decoding can copy context when audio is silent or weak, while real speech can anchor the same context as a useful vocabulary hint. This upstream model behavior remains unchanged rather than adding lossy prompt filtering or a separate hotword model.
 - Added GitHub Container Registry as an official image mirror. One workflow publishes identical full and tiny rolling and immutable tags to Docker Hub and GHCR.
@@ -443,7 +461,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added complete browser UI localization for English, Polish, Japanese, Chinese, Spanish, and German. Official locale routes (`/en`, `/pl`, `/ja`, `/zh`, `/es`, and `/de`) provide stable guide links, while the root page defaults to English and remembers each browser's selected language.
 - Added a responsive, dependency-free GitHub Pages showcase with playable repository audio, reference transcripts, native-language filters, and self-contained localization for all 30 supported transcription languages. Selecting a language now filters its recording and localizes the page automatically, while the browser UI links to the matching language directly.
 - Made public Docker and API commands single-line for direct use in Bash, PowerShell, and Windows Command Prompt, documented the provenance of generated audio fixtures, and kept GitHub Release publication as an explicit manual gate after tagged deployment validation.
-- Added concise GitHub README summaries in Norwegian BokmÃ¥l, Polish, Japanese, Simplified Chinese, and Spanish, with a language switcher below the project logo and locale-matched links to the complete Hangry Labs product guides.
+- Added concise GitHub README summaries in Norwegian BokmÃƒÂ¥l, Polish, Japanese, Simplified Chinese, and Spanish, with a language switcher below the project logo and locale-matched links to the complete Hangry Labs product guides.
 
 Run this release with either image variant:
 
