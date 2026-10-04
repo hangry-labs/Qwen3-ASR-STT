@@ -254,10 +254,13 @@ pre { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .aligner-action-row { display: flex; justify-content: flex-end; gap: 8px; }
 .aligner-action-row .secondary-button { min-width: 112px; }
 .data-output { min-height: 420px; margin-top: 18px; padding: 16px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; background: #121315; color: #c9cbd1; font-size: 0.76rem; line-height: 1.55; }
-.system-grid { display: grid; grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.2fr); align-items: start; gap: 22px; }
-.system-grid .data-output { min-height: 320px; }
+.system-grid { display: grid; grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.2fr); align-items: start; gap: 22px; margin-top: 18px; }
+.system-controls { display: grid; min-width: 0; gap: 14px; }
+.system-controls .aligner-settings-card { grid-template-columns: 1fr; gap: 16px; margin-top: 0; }
+.system-controls .runtime-settings-card { margin: 0; }
+.system-grid .data-output { min-height: 320px; margin-top: 0; }
 .gpu-system-panel { min-width: 0; }
-.gpu-monitor { margin-top: 18px; }
+.gpu-monitor { margin-top: 0; }
 .gpu-monitor-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .gpu-monitor-title { margin-bottom: 10px; font-size: 0.84rem; font-weight: 750; }
 .gpu-monitor-heading .gpu-monitor-title { margin-bottom: 0; }

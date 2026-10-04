@@ -175,40 +175,45 @@
 
       <div class="tab-panel" data-panel="system" hidden>
         <div class="view-heading"><div><h2 data-i18n="system.title">System</h2><p data-i18n="system.description">Inference readiness and GPU runtime</p></div></div>
-        <section class="aligner-settings-card" aria-labelledby="aligner-settings-title">
-          <div class="aligner-settings-copy">
-            <div class="aligner-settings-heading">
-              <div><i class="icon-audio-lines"></i><strong id="aligner-settings-title" data-i18n="aligner.title">Forced aligner</strong></div>
-              <span class="aligner-status-badge" id="aligner-status-badge" data-state="checking" data-i18n="common.checking">Checking…</span>
-            </div>
-            <p data-i18n="aligner.description">Word and caption-style segment timestamps use an additional multilingual Qwen3-ForcedAligner model. Unchecking both timestamp options releases it after 60 seconds unless it is kept loaded here. First load can add roughly 3.3 GiB of VRAM; some compiled CUDA context may remain cached after release.</p>
-            <span class="aligner-model-name" id="aligner-model-name" data-i18n="aligner.detecting">Detecting aligner configuration…</span>
+        <div class="system-grid">
+          <div class="system-controls">
+            <section class="aligner-settings-card" aria-labelledby="aligner-settings-title">
+              <div class="aligner-settings-copy">
+                <div class="aligner-settings-heading">
+                  <div><i class="icon-audio-lines"></i><strong id="aligner-settings-title" data-i18n="aligner.title">Forced aligner</strong></div>
+                  <span class="aligner-status-badge" id="aligner-status-badge" data-state="checking" data-i18n="common.checking">Checking…</span>
+                </div>
+                <p data-i18n="aligner.description">Word and caption-style segment timestamps use an additional multilingual Qwen3-ForcedAligner model. Unchecking both timestamp options releases it after 60 seconds unless it is kept loaded here. First load can add roughly 3.3 GiB of VRAM; some compiled CUDA context may remain cached after release.</p>
+                <span class="aligner-model-name" id="aligner-model-name" data-i18n="aligner.detecting">Detecting aligner configuration…</span>
+              </div>
+              <div class="aligner-settings-actions">
+                <label class="switch-field" for="aligner-load-always">
+                  <span><strong data-i18n="aligner.keepLoaded">Always keep aligner loaded</strong><small data-i18n="aligner.keepLoadedHelp">Persist this preference and load the model during every startup.</small></span>
+                  <input id="aligner-load-always" type="checkbox" role="switch">
+                </label>
+                <div class="aligner-action-row">
+                  <button class="secondary-button" id="aligner-load-now" type="button" data-i18n="aligner.loadNow">Load now</button>
+                  <button class="secondary-button" id="aligner-unload-now" type="button" data-i18n="aligner.releaseVram">Release VRAM</button>
+                </div>
+              </div>
+            </section>
+            <section class="runtime-settings-card" aria-labelledby="realtime-defaults-title">
+              <div class="runtime-settings-heading">
+                <div><i class="icon-sliders-horizontal"></i><strong id="realtime-defaults-title" data-i18n="system.realtimeDefaults">Realtime defaults</strong></div>
+                <button class="secondary-button" id="realtime-defaults-save" type="button" data-i18n="system.saveDefaults">Save defaults</button>
+              </div>
+              <p data-i18n="system.realtimeDefaultsHelp">Persistent starting values for new browser and API realtime sessions. Individual API requests can still override them.</p>
+              <div class="range-grid">
+                <label><span class="range-heading"><span data-i18n="settings.chunkSeconds">Chunk seconds</span><output data-output="system-chunk-size"></output></span><input id="system-chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2"></label>
+                <label><span class="range-heading"><span data-i18n="settings.audioWindow">Audio window</span><output data-output="system-max-window"></output></span><input id="system-max-window" data-setting type="range" min="10" max="60" step="5" value="30"></label>
+                <label><span class="range-heading"><span data-i18n="settings.unfixedChunks">Unfixed chunks</span><output data-output="system-unfixed-chunks"></output></span><input id="system-unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2"></label>
+                <label><span class="range-heading"><span data-i18n="settings.unfixedTokens">Unfixed tokens</span><output data-output="system-unfixed-tokens"></output></span><input id="system-unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5"></label>
+              </div>
+            </section>
+            <pre class="data-output" id="readiness-output" data-i18n="system.readinessUnavailable">Readiness unavailable.</pre>
           </div>
-          <div class="aligner-settings-actions">
-            <label class="switch-field" for="aligner-load-always">
-              <span><strong data-i18n="aligner.keepLoaded">Always keep aligner loaded</strong><small data-i18n="aligner.keepLoadedHelp">Persist this preference and load the model during every startup.</small></span>
-              <input id="aligner-load-always" type="checkbox" role="switch">
-            </label>
-            <div class="aligner-action-row">
-              <button class="secondary-button" id="aligner-load-now" type="button" data-i18n="aligner.loadNow">Load now</button>
-              <button class="secondary-button" id="aligner-unload-now" type="button" data-i18n="aligner.releaseVram">Release VRAM</button>
-            </div>
-          </div>
-        </section>
-        <section class="runtime-settings-card" aria-labelledby="realtime-defaults-title">
-          <div class="runtime-settings-heading">
-            <div><i class="icon-sliders-horizontal"></i><strong id="realtime-defaults-title" data-i18n="system.realtimeDefaults">Realtime defaults</strong></div>
-            <button class="secondary-button" id="realtime-defaults-save" type="button" data-i18n="system.saveDefaults">Save defaults</button>
-          </div>
-          <p data-i18n="system.realtimeDefaultsHelp">Persistent starting values for new browser and API realtime sessions. Individual API requests can still override them.</p>
-          <div class="range-grid">
-            <label><span class="range-heading"><span data-i18n="settings.chunkSeconds">Chunk seconds</span><output data-output="system-chunk-size"></output></span><input id="system-chunk-size" data-setting type="range" min="0.5" max="5" step="0.25" value="2"></label>
-            <label><span class="range-heading"><span data-i18n="settings.audioWindow">Audio window</span><output data-output="system-max-window"></output></span><input id="system-max-window" data-setting type="range" min="10" max="60" step="5" value="30"></label>
-            <label><span class="range-heading"><span data-i18n="settings.unfixedChunks">Unfixed chunks</span><output data-output="system-unfixed-chunks"></output></span><input id="system-unfixed-chunks" data-setting type="range" min="0" max="6" step="1" value="2"></label>
-            <label><span class="range-heading"><span data-i18n="settings.unfixedTokens">Unfixed tokens</span><output data-output="system-unfixed-tokens"></output></span><input id="system-unfixed-tokens" data-setting type="range" min="0" max="20" step="1" value="5"></label>
-          </div>
-        </section>
-        <div class="system-grid"><pre class="data-output" id="readiness-output" data-i18n="system.readinessUnavailable">Readiness unavailable.</pre><section class="gpu-system-panel" id="gpu-output" aria-live="polite"></section></div>
+          <section class="gpu-system-panel" id="gpu-output" aria-live="polite"></section>
+        </div>
       </div>
     </section>
   </main>

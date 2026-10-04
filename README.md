@@ -4,6 +4,15 @@
   </a>
 </p>
 
+<p align="center">
+  <strong>English</strong> ·
+  <a href="README.nb.md">Norsk bokmål</a> ·
+  <a href="README.pl.md">Polski</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.zh.md">简体中文</a> ·
+  <a href="README.es.md">Español</a>
+</p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 Docker-first speech-to-text packaging for Qwen3-ASR with a local browser UI and OpenAI-compatible transcription API.
@@ -420,7 +429,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added Japanese word/segment alignment support to the image, capability-aware timestamp language validation, automatic idle aligner release, forced `verbose_json` timestamp output, actionable language-tokenizer errors, persistent realtime defaults, and one unified data volume for model assets, compiler caches, and application settings across releases.
 - Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Consolidated artwork under `assets/`, converted shipped web artwork to WebP, and reduced the vendored Lucide font to the glyphs used by the workspace.
 - Refined microphone workflows with automatic example loading, single-button record/stop controls for both recorded and realtime audio, responsive recording waveforms, aligned device refresh controls, and clearer recording status placement.
-- Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration.
+- Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration. The System layout now keeps operational controls in the narrower left column while the wider GPU monitor remains at the top right.
 - Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
 - Reorganized runtime composition into a dedicated product application layer, limited the browser and API modules to their own responsibilities, colocated GPU telemetry with the UI, removed the obsolete API-only launcher and direct-library input/export compatibility paths, and pruned seven unused packages from the locked Docker dependency set.
 - Polished forced-alignment workflows with timestamp choice restoration during ordinary page refreshes, automatic removal of incompatible examples, live load-completion feedback, tokenizer preloading, and dynamic-shape compilation to avoid first-use recompilation when audio or alignment language changes.
@@ -434,6 +443,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added complete browser UI localization for English, Polish, Japanese, Chinese, Spanish, and German. Official locale routes (`/en`, `/pl`, `/ja`, `/zh`, `/es`, and `/de`) provide stable guide links, while the root page defaults to English and remembers each browser's selected language.
 - Added a responsive, dependency-free GitHub Pages showcase with playable repository audio, reference transcripts, native-language filters, and self-contained localization for all 30 supported transcription languages. Selecting a language now filters its recording and localizes the page automatically, while the browser UI links to the matching language directly.
 - Made public Docker and API commands single-line for direct use in Bash, PowerShell, and Windows Command Prompt, documented the provenance of generated audio fixtures, and kept GitHub Release publication as an explicit manual gate after tagged deployment validation.
+- Added concise GitHub README summaries in Norwegian Bokmål, Polish, Japanese, Simplified Chinese, and Spanish, with a language switcher below the project logo and locale-matched links to the complete Hangry Labs product guides.
 
 The current development snapshot is published through the rolling tags from `main`:
 
