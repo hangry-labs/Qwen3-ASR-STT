@@ -294,7 +294,7 @@ Only transcribe audio you are allowed to process. Do not use this image for cove
 - GitHub repository: https://github.com/Hangry-Labs/Qwen3-ASR-STT
 - Upstream Qwen3-ASR repository: https://github.com/QwenLM/Qwen3-ASR
 - Upstream model collection: https://huggingface.co/collections/Qwen/qwen3-asr
-- Hangry Labs: https://nuggies.website/
+- Hangry Labs: https://hangrylabs.app/
 
 ## Attribution
 

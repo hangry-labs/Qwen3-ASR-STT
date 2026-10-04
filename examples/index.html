@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-loading="true">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Listen to multilingual Qwen3-ASR-STT transcription examples from Hangry Labs.">
+  <title>Hangry Labs Qwen3-ASR-STT Examples</title>
+  <link rel="icon" type="image/webp" href="../assets/qwen3_asr_favicon.webp">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="page.js"></script>
+</head>
+<body>
+  <canvas id="shapes" aria-hidden="true"></canvas>
+  <main class="page-shell">
+    <div class="page-content">
+      <header class="hero">
+        <div class="hero-copy">
+          <div class="topbar">
+            <a class="brand-lockup" href="https://hangrylabs.app/" target="_blank" rel="noopener noreferrer">
+              <img class="brand-logo" src="../assets/hangrylabs_favicon.webp" alt="Hangry Labs">
+              <span><strong>Hangry Labs</strong><small data-i18n="examplesPage.brandSubtitle">Useful tools, easy to run</small></span>
+            </a>
+            <div class="top-actions">
+              <label class="locale-control">
+                <span class="visually-hidden" data-i18n="locale.label">Interface language</span>
+                <select id="page-locale" aria-label="Interface language"></select>
+              </label>
+              <div class="volume-control" aria-label="Volume control" data-i18n-aria-label="examplesPage.volumeControl">
+                <button class="volume-button" type="button" aria-label="Mute audio" data-muted="false">
+                  <svg class="volume-icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 15.5H4.75A1.75 1.75 0 0 1 3 13.75v-3.5c0-.97.78-1.75 1.75-1.75H6.5l5-4.25v15.5l-5-4.25zM16 8.5a5 5 0 0 1 0 7M18.75 6a8.5 8.5 0 0 1 0 12"/></svg>
+                  <svg class="volume-icon-muted" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden><path d="M6.5 15.5H4.75A1.75 1.75 0 0 1 3 13.75v-3.5c0-.97.78-1.75 1.75-1.75H6.5l5-4.25v15.5l-5-4.25zM17 9.5l4 4M21 9.5l-4 4"/></svg>
+                </button>
+                <input class="volume-slider" type="range" min="0" max="1" step="0.01" value="0.85" aria-label="Volume" data-i18n-aria-label="editor.volume">
+              </div>
+              <nav class="top-links" aria-label="Project links" data-i18n-aria-label="examplesPage.projectLinks">
+                <a class="pill action-link" href="https://hub.docker.com/r/hangrylabs/qwen3-asr-stt/tags">Docker Hub</a>
+                <a class="pill action-link" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT">GitHub</a>
+              </nav>
+            </div>
+          </div>
+          <h1 data-i18n="examplesPage.headline">Qwen3-ASR-STT language examples</h1>
+          <p class="intro" data-i18n="examplesPage.intro">Hear real multilingual test samples and read the reference transcript beside each recording. These are the same repository fixtures used to validate the local Docker transcription API.</p>
+          <div class="feature-pills">
+            <span class="pill" data-i18n="examplesPage.pillLanguages">30 languages</span>
+            <span class="pill" data-i18n="examplesPage.pillSamples">Repository test audio</span>
+            <span class="pill" data-i18n="examplesPage.pillApi">OpenAI-compatible API</span>
+            <span class="pill" data-i18n="examplesPage.pillOffline">Offline-friendly Docker image</span>
+          </div>
+        </div>
+        <div class="hero-logo-panel">
+          <a class="hero-logo-link" href="https://github.com/Hangry-Labs/Qwen3-ASR-STT" aria-label="Qwen3-ASR-STT on GitHub">
+            <img class="hero-logo" src="../assets/qwen3_asr_logo_horizontal.webp" alt="Qwen3-ASR-STT">
+          </a>
+          <a class="hero-site-link" href="https://hangrylabs.app/" target="_blank" rel="noopener noreferrer">hangrylabs.app</a>
+        </div>
+      </header>
+
+      <section class="examples-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow" data-i18n="examplesPage.collectionEyebrow">Multilingual test corpus</p>
+            <h2 data-i18n="examplesPage.collectionTitle">Listen by language</h2>
+          </div>
+          <p data-i18n="examplesPage.collectionHelp">Select a language or browse one representative recording for every language supported by Qwen3-ASR.</p>
+        </div>
+        <div class="language-filter" id="language-filter" role="group" aria-label="Filter examples by language" data-i18n-aria-label="examplesPage.filterLabel"></div>
+        <div class="loading-state" id="loading-state" role="status" data-i18n="examplesPage.loading">Loading examples…</div>
+        <section class="example-grid" id="example-grid" aria-label="Transcription examples" data-i18n-aria-label="examplesPage.cardsLabel"></section>
+      </section>
+
+      <footer>
+        <span data-i18n="examplesPage.footer">Run Qwen3-ASR-STT locally. Your audio stays on your machine.</span>
+        <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT" data-i18n="examplesPage.getStarted">Get started on GitHub</a>
+      </footer>
+    </div>
+  </main>
+  <script src="background.js"></script>
+</body>
+</html>

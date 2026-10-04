@@ -55,7 +55,10 @@ class StandaloneUiTests(unittest.TestCase):
 
         self.assertEqual(index.status_code, 200)
         self.assertIn("Qwen3-ASR-STT", index.text)
-        self.assertIn("Qwen3-ASR-STT/tree/main/testbench", index.text)
+        self.assertIn("https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=en", index.text)
+        self.assertNotIn("Qwen3-ASR-STT/tree/main/testbench", index.text)
+        self.assertIn('href="https://hangrylabs.app/"', index.text)
+        self.assertNotIn("nuggies.website", index.text)
         self.assertIn('src="/assets/qwen3_asr_logo_horizontal.webp"', index.text)
         self.assertIn('href="/assets/qwen3_asr_favicon.webp"', index.text)
         self.assertIn('class="collapsed-mascot"', index.text)
@@ -183,6 +186,10 @@ class StandaloneUiTests(unittest.TestCase):
                 self.assertIn(f'<html lang="{locale}" dir="ltr">', response.text)
                 self.assertIn(f'"locale":"{locale}"', response.text)
                 self.assertIn('"messages":{"app.title":"Qwen3-ASR-STT"', response.text)
+                self.assertIn(
+                    f"https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang={locale}",
+                    response.text,
+                )
 
                 catalog_response = client.get(f"/static/locales/{locale}.json")
                 self.assertEqual(catalog_response.status_code, 200, locale)

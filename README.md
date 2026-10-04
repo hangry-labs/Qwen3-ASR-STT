@@ -12,6 +12,8 @@ This Hangry Labs fork is built for local inference. The goal is simple: pull or 
 
 Official images are published to both [Docker Hub](https://hub.docker.com/r/hangrylabs/qwen3-asr-stt/tags) and [GitHub Container Registry](https://github.com/Hangry-Labs/Qwen3-ASR-STT/pkgs/container/qwen3-asr-stt).
 
+Listen to real multilingual test recordings on the [Qwen3-ASR-STT examples page](https://hangry-labs.github.io/Qwen3-ASR-STT/examples/).
+
 ## What This Project Provides
 
 - Local browser UI for upload, recording, realtime microphone transcription, API status, and GPU visibility
@@ -89,6 +91,8 @@ Snapshot or development version tags are intentionally not published. Release ta
 ## Browser UI
 
 The primary responsive browser UI runs on port 8000 alongside the OpenAI-compatible API. Its HTML, CSS, JavaScript, icons, and WaveSurfer assets are included locally, so the full image remains usable offline after it is pulled.
+
+The header's **Examples** link opens the public multilingual showcase in the currently selected interface language. It offers one playable repository test recording and reference transcript for each of the 30 supported transcription languages.
 
 The interface provides four focused views:
 
@@ -391,6 +395,14 @@ task localrun
 task logs
 ```
 
+Preview the static examples website from the repository root:
+
+```bash
+python -m http.server 8011
+```
+
+Then open [http://localhost:8011/examples/](http://localhost:8011/examples/). Opening `examples/index.html` directly as a `file://` URL cannot load its JSON manifest and translation catalogs because browsers block those cross-file requests.
+
 Run benchmark model profiles:
 
 ```bash
@@ -461,6 +473,7 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 - Added GitHub Container Registry as an official image mirror. One workflow publishes identical full and tiny rolling and immutable tags to Docker Hub and GHCR.
 - Unified full and tiny publishing in one Buildx job so both variants reuse the same dependency graph without loading either image into the runner's Docker store. Model prefetch now depends only on its focused downloader code and build arguments, and baked assets occupy an independent final-image layer, allowing unrelated UI/API changes to reuse both the downloads and the large model layer.
 - Added complete browser UI localization for English, Polish, Japanese, Chinese, Spanish, and German. Official locale routes (`/en`, `/pl`, `/ja`, `/zh`, `/es`, and `/de`) provide stable guide links, while the root page defaults to English and remembers each browser's selected language.
+- Added a responsive, dependency-free GitHub Pages showcase with playable repository audio, reference transcripts, language filters, and localized URLs for all 30 supported transcription languages. The browser UI now links to the showcase in the visitor's selected interface language.
 
 The current development snapshot is published through the rolling tags from `main`:
 
