@@ -2,6 +2,15 @@
   <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/assets/qwen3_asr_logo_horizontal.webp" alt="Hangry Labs Qwen3-ASR-STT logo">
 </p>
 
+<p align="center">
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.md">English</a> ·
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.nb.md">Norsk bokmål</a> ·
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.pl.md">Polski</a> ·
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.ja.md">日本語</a> ·
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.zh.md">简体中文</a> ·
+  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.es.md">Español</a>
+</p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 Easy-to-run local speech-to-text Docker images for Qwen3-ASR, with a browser UI and OpenAI-compatible transcription API included.
