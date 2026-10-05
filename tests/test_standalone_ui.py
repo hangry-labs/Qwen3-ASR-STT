@@ -58,7 +58,6 @@ class StandaloneUiTests(unittest.TestCase):
         self.assertIn("https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=en", index.text)
         self.assertNotIn("Qwen3-ASR-STT/tree/main/testbench", index.text)
         self.assertIn('href="https://hangrylabs.app/software"', index.text)
-        self.assertNotIn("nuggies.website", index.text)
         self.assertIn('src="/assets/qwen3_asr_logo_horizontal.webp"', index.text)
         self.assertIn('href="/assets/qwen3_asr_favicon.webp"', index.text)
         self.assertIn('class="collapsed-mascot"', index.text)

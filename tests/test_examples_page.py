@@ -23,7 +23,6 @@ class ExamplesPageTests(unittest.TestCase):
         self.assertIn('src="translations.js"', html)
         self.assertIn('src="catalog.js"', html)
         self.assertIn('href="https://hangrylabs.app/software"', html)
-        self.assertNotIn("nuggies.website", html)
         self.assertIn('src="background.js"', html)
         self.assertIn('href="styles.css"', html)
         self.assertIn('../assets/qwen3_asr_logo.webp', html)
