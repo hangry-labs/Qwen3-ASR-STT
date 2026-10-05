@@ -70,6 +70,49 @@ function Get-VersionHistoryDockerSection {
     ) -join $LineEnding
 }
 
+function Add-VersionHistoryDisclosure {
+    param(
+        [string]$Content,
+        [string]$Heading,
+        [string]$LineEnding
+    )
+
+    $headingLine = "$Heading$LineEnding"
+    $headingIndex = $Content.IndexOf($headingLine, [System.StringComparison]::Ordinal)
+    if ($headingIndex -lt 0) {
+        throw "README.md release heading '$Heading' is not followed by a line ending."
+    }
+
+    $bodyStart = $headingIndex + $headingLine.Length
+    $remaining = $Content.Substring($bodyStart)
+    if ($remaining -match '^\r?\n<details>') {
+        return $Content
+    }
+
+    $nextHeading = [regex]::Match($remaining, '(?m)^(?:### v|## )')
+    if (-not $nextHeading.Success) {
+        throw "README.md release history after '$Heading' has no following section boundary."
+    }
+
+    $bodyEnd = $bodyStart + $nextHeading.Index
+    $body = $Content.Substring($bodyStart, $bodyEnd - $bodyStart).Trim([char[]]"`r`n")
+    $label = $Heading.Substring(4)
+    $wrapped = @(
+        $Heading,
+        "",
+        '<details>',
+        "",
+        "<summary><strong>Show $label release notes and deployment commands</strong></summary>",
+        "",
+        $body,
+        "",
+        '</details>',
+        ""
+    ) -join $LineEnding
+
+    return $Content.Substring(0, $headingIndex) + $wrapped + $Content.Substring($bodyEnd)
+}
+
 function Invoke-Native {
     param([string]$Description, [scriptblock]$Action)
     & $Action
@@ -287,6 +330,10 @@ Invoke-Step "Prepare $nextSnapshotVersion" {
         }
 
         $lineEnding = if ($updatedReadme.Contains("`r`n")) { "`r`n" } else { "`n" }
+        $updatedReadme = Add-VersionHistoryDisclosure `
+            -Content $updatedReadme `
+            -Heading $stableHeading `
+            -LineEnding $lineEnding
         $stableHeadingLine = "$stableHeading$lineEnding"
         if (-not $updatedReadme.Contains($stableHeadingLine)) {
             throw "README.md release heading '$stableHeading' is not followed by a line ending."

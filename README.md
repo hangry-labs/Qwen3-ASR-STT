@@ -72,13 +72,23 @@ No network access is required after pulling the full image. A fresh named volume
 
 ## Tiny Image
 
+<details>
+
+<summary><strong>Show tiny image deployment guidance</strong></summary>
+
 The tiny image keeps runtime dependencies but does not bake model assets. Use it when you want a smaller image and a unified persistent product volume that warms on first online use:
 
 ```bash
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
+</details>
+
 ## Image Tags
+
+<details>
+
+<summary><strong>Show available image tags and registries</strong></summary>
 
 - Docker Hub repository: `hangrylabs/qwen3-asr-stt`
 - GitHub Container Registry repository: `ghcr.io/hangry-labs/qwen3-asr-stt`
@@ -88,6 +98,8 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 - Tiny release image: `vX.Y_tiny` or `vX.Y.Z_tiny`, for example `v1.0_tiny`
 
 Snapshot or development version tags are intentionally not published. Release tags are created only when the project is ready for a release.
+
+</details>
 
 ## Browser UI
 
@@ -113,6 +125,10 @@ The Stream tab uses local realtime transcription sessions backed by repeated inf
 Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
 
 ## OpenAI-Compatible API
+
+<details>
+
+<summary><strong>Show API contract, examples, and client usage</strong></summary>
 
 The stable integration target is `POST /v1/audio/transcriptions`. It is exercised with the current OpenAI Python client and can be used by applications that allow a custom OpenAI base URL, including local assistants and automation tools. Interactive OpenAPI documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
@@ -176,7 +192,13 @@ print(result.text)
 
 The `api_key="local"` value satisfies the client constructor; this local server does not validate it. There is no built-in authentication. Treat the service as a trusted local/private-network application, or place an authenticating reverse proxy in front of it. To restrict Docker publishing to the host itself, use `-p 127.0.0.1:8000:8000` instead of `-p 8000:8000`.
 
+</details>
+
 ## MCP
+
+<details>
+
+<summary><strong>Show MCP documentation and endpoint reference</strong></summary>
 
 Both image variants include an opt-in Model Context Protocol server at [http://localhost:8000/mcp](http://localhost:8000/mcp). Enable **MCP connectivity** in the System tab on a trusted deployment first. It uses stateless Streamable HTTP in the existing UI/API process, so MCP clients share the already-loaded model, inference queue, upload limit, aligner lifecycle, GPU monitor, settings store, and port. No second model copy or sidecar is started.
 
@@ -251,7 +273,13 @@ Protocol endpoint:
 
 `/v1/audio/translations` exists as an explicit not-implemented response until Qwen3-ASR translation behavior has a dedicated compatibility pass.
 
+</details>
+
 ## Models
+
+<details>
+
+<summary><strong>Show model and forced-aligner details</strong></summary>
 
 Default full image model:
 
@@ -279,7 +307,13 @@ The forced aligner is not loaded by default. Its first compiled load increased o
 
 The single Qwen aligner supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. It is not a separate model per language; ASR languages outside that list, including Turkish, remain transcribable but cannot produce Qwen forced-alignment timestamps. Japanese alignment includes the required `nagisa` tokenizer. Korean transcription remains supported, but Korean word/segment alignment is not packaged to avoid adding its GPLv3-only optional tokenizer to the Apache-2.0 image; unsupported or unavailable forced-language requests return an actionable HTTP 422 before loading the aligner.
 
+</details>
+
 ## Runtime Settings
+
+<details>
+
+<summary><strong>Show runtime settings, persistence, and operations</strong></summary>
 
 Every container starts the browser UI and OpenAI-compatible API together on port 8000.
 
@@ -369,7 +403,13 @@ To use browser microphone recording from another machine, mount a trusted certif
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem -v /absolute/path/to/certs:/certs:ro hangrylabs/qwen3-asr-stt:latest
 ```
 
+</details>
+
 ## Local Development
+
+<details>
+
+<summary><strong>Show local development and release workflows</strong></summary>
 
 This repository uses Taskfile workflows on the development workstation.
 
@@ -440,7 +480,13 @@ Stop containers:
 task imagestop
 ```
 
+</details>
+
 ## Benchmarks
+
+<details>
+
+<summary><strong>Show benchmark documentation and commands</strong></summary>
 
 Public benchmark notes live in:
 
@@ -460,6 +506,8 @@ task benchmark-transcription-06b
 ```
 
 The benchmark scores focus on transcription meaning. Punctuation, quote recovery, and expressive marks are counted as bonus signal rather than required exact text.
+
+</details>
 
 ## Version History
 
@@ -485,6 +533,10 @@ docker run --name qwen3-asr-stt-tiny --restart unless-stopped -p 8000:8000 --gpu
 ```
 
 ### v1.0
+
+<details>
+
+<summary><strong>Show v1.0 release notes and deployment commands</strong></summary>
 
 - Hardened the public API contract for OpenAI-client integrations while retaining its convenient permissive behavior: documented multipart and realtime schemas in `/docs`, made the single loaded model optional to specify, added model registration timestamps, completed unaligned `verbose_json` metadata, made SRT/VTT use real forced alignment, enforced timestamp-format rules, added tested AAC support and a configurable 100 MB upload limit, normalized unexpected failures, grouped custom and compatible routes, and added a live OpenAI Python client contract regression.
 - Added persistent and on-demand forced-aligner lifecycle management. Word or Segment selection can load the aligner without restarting, while the System tab can release its VRAM or keep it loaded across container replacements through the unified product data volume. Segment output is now divided into punctuation-, silence-, and duration-aware cues instead of one whole-file block.
@@ -521,7 +573,13 @@ docker run --name qwen3-asr-stt-v1-0 --restart unless-stopped -p 8000:8000 --gpu
 docker run --name qwen3-asr-stt-v1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:v1.0_tiny@sha256:92fe5ffec58b53c068895c94bfe407201cad2aa0f577ca03e842d9efb69257b7
 ```
 
+</details>
+
 ### v0.2.0
+
+<details>
+
+<summary><strong>Show v0.2.0 release notes and deployment commands</strong></summary>
 
 - Synchronized the maintained Hangry Labs runtime with upstream Qwen3-ASR through upstream commit `7c6daf7`.
 - Migrated the runtime to the upstream Hugging Face Qwen3-ASR and forced-aligner implementations.
@@ -551,7 +609,13 @@ docker run --name qwen3-asr-stt-v0-2-0 --restart unless-stopped -p 8000:8000 --g
 docker run --name qwen3-asr-stt-v0-2-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_2_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.2.0_tiny@sha256:2facd0a2b4396ce656c38773bed7dba1d2ad6c401d2881ff39c0a81a83333524
 ```
 
+</details>
+
 ### v0.1.0
+
+<details>
+
+<summary><strong>Show v0.1.0 release notes and deployment commands</strong></summary>
 
 - Forked Qwen3-ASR into a Hangry Labs runtime-focused project for local and private speech-to-text inference.
 - Added a Python 3.13 runtime with pinned dependencies and reproducible full and tiny Docker image targets.
@@ -586,6 +650,8 @@ docker run --name qwen3-asr-stt-v0-1-0 --restart unless-stopped -p 8000:8000 --g
 ```bash
 docker run --name qwen3-asr-stt-v0-1-0-tiny --restart unless-stopped -p 8000:8000 --gpus all -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_v0_1_0_hf_cache:/app/.cache/huggingface hangrylabs/qwen3-asr-stt:v0.1.0_tiny@sha256:0274e0b2cfcbb5595f24fccec5b0dcbbdfc8e3baf2ba66c737154d843a73f3fe
 ```
+
+</details>
 
 ## Responsible Use and Privacy
 

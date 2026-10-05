@@ -80,6 +80,10 @@ http://localhost:8000/docs
 
 ## Tiny Image
 
+<details>
+
+<summary><strong>Show tiny image deployment guidance</strong></summary>
+
 Use `latest_tiny` when you want runtime dependencies but prefer model assets to live in a persistent cache volume:
 
 ```bash
@@ -88,7 +92,13 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 The tiny image downloads model assets on first online use, then reuses the mounted data volume across later image tags.
 
+</details>
+
 ## Image Tags
+
+<details>
+
+<summary><strong>Show available image tags and registries</strong></summary>
 
 - Docker Hub: `hangrylabs/qwen3-asr-stt`
 - GitHub Container Registry: `ghcr.io/hangry-labs/qwen3-asr-stt`
@@ -99,7 +109,13 @@ The tiny image downloads model assets on first online use, then reuses the mount
 
 Snapshot tags are not published.
 
-## API Example
+</details>
+
+## API examples and OpenAI-compatible usage
+
+<details>
+
+<summary><strong>Show API examples and guidance</strong></summary>
 
 The stable integration endpoint is `POST /v1/audio/transcriptions`, tested with the current OpenAI Python client. Interactive request and response documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs). Uploads are tested with `aac`, `flac`, `mp3`, `mp4`, `mpeg`, `mpga`, `m4a`, `ogg`, `wav`, and `webm`; other formats are passed to the bundled decoder. The configurable default limit is 100 MB. Because the deployment serves one loaded model, `model` may be omitted and that model is selected automatically.
 
@@ -146,7 +162,13 @@ print(result.text)
 
 The local server does not authenticate the placeholder `api_key="local"`. Keep it on a trusted local/private network or add an authenticating reverse proxy. For loopback-only Docker access, publish with `-p 127.0.0.1:8000:8000`.
 
-## MCP
+</details>
+
+## MCP integration and endpoint reference
+
+<details>
+
+<summary><strong>Show MCP documentation and endpoints</strong></summary>
 
 Both image variants include opt-in stateless MCP Streamable HTTP at `http://localhost:8000/mcp`. Enable **MCP connectivity** in the System tab on a trusted deployment first. It runs inside the same process and shares the loaded model, inference queue, upload limit, GPU monitor, settings, and on-demand aligner with the UI and REST API.
 
@@ -183,7 +205,13 @@ Useful routes:
 
 `stream=true` on the file endpoint returns OpenAI-compatible `transcript.text.delta` and `transcript.text.done` SSE events after completed-file inference. The realtime session API used by the Stream tab is different: it accepts audio progressively, repeatedly decodes a configurable recent-audio window, and retains older stable transcript text outside the prompt. This produces live updates while recording and prevents inference latency and context from growing without bound, but its HTTP session protocol is not the OpenAI Realtime WebSocket protocol.
 
-## Runtime Configuration
+</details>
+
+## Advanced runtime configuration and operations
+
+<details>
+
+<summary><strong>Show runtime settings and operational guidance</strong></summary>
 
 Default model:
 
@@ -267,6 +295,8 @@ To use browser microphone recording from another machine, mount a trusted certif
 ```bash
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem -e QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem -v /absolute/path/to/certs:/certs:ro hangrylabs/qwen3-asr-stt:latest
 ```
+
+</details>
 
 ## Responsible Use and Privacy
 
