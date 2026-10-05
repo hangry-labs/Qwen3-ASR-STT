@@ -23,7 +23,7 @@ Esta versión de Hangry Labs está diseñada para inferencia local. Inicia un so
 
 - Interfaz web local para subir archivos, grabar y transcribir el micrófono en tiempo real
 - Endpoint `/v1/audio/transcriptions` compatible con OpenAI
-- Servidor MCP Streamable HTTP opcional en `/mcp` para agentes, con estado, transcripción mediante rutas compartidas y controles del sistema
+- Servidor MCP Streamable HTTP opcional en `/mcp` para agentes, con estado, transcripción mediante rutas compartidas o URL HTTP(S), y controles del sistema
 - Transcripción multilingüe y detección automática del idioma
 - Marcas de tiempo opcionales por palabra y segmento
 - Supervisión de la GPU y ajustes persistentes

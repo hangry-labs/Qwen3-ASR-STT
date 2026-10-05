@@ -920,6 +920,25 @@ def create_app(
         except InferenceUnavailableError as exc:
             raise _inference_http_exception(exc) from exc
 
+    async def set_aligner_loaded(enabled: bool) -> dict[str, Any]:
+        """Set only the aligner's current in-memory state, preserving startup policy."""
+        snapshot = aligner_snapshot()
+        if snapshot["loaded"] == enabled:
+            return snapshot
+        if enabled:
+            return await ensure_aligner_loaded()
+        if aligner_runtime is None:
+            raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
+        try:
+            return await coordinator.run(
+                "aligner_unload",
+                aligner_runtime.unload,
+                language_mode="alignment",
+                deadline_seconds=aligner_load_timeout,
+            )
+        except InferenceUnavailableError as exc:
+            raise _inference_http_exception(exc) from exc
+
     async def configure_aligner_runtime(enabled: bool) -> dict[str, Any]:
         if aligner_runtime is None:
             raise HTTPException(status_code=400, detail="Dynamic forced-aligner management is unavailable.")
@@ -950,6 +969,7 @@ def create_app(
     app.state.aligner_snapshot = aligner_snapshot
     app.state.ensure_aligner_loaded = ensure_aligner_loaded
     app.state.release_aligner = release_aligner_runtime
+    app.state.set_aligner_loaded = set_aligner_loaded
     app.state.configure_aligner = configure_aligner_runtime
 
     @app.exception_handler(HTTPException)

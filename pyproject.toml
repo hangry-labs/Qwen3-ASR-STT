@@ -31,6 +31,7 @@ dependencies = [
   "soundfile==0.13.1",
   "fastapi==0.136.3",
   "mcp==2.3.0",
+  "httpx==0.28.1",
   "uvicorn==0.51.0",
   "python-multipart==0.0.32",
   "numpy==2.2.6",

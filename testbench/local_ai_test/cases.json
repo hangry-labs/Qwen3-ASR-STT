@@ -13,7 +13,7 @@
     "expected_tools": ["transcribe_audio_file"],
     "expected_outcomes": ["success"],
     "argument_rules": [
-      {"file_path": {"equals": "english-01.mp3"}}
+      {"file_location": {"equals": "english-01.mp3"}}
     ]
   },
   {
@@ -23,7 +23,7 @@
     "expected_outcomes": ["success"],
     "argument_rules": [
       {
-        "file_path": {"equals": "english-01.mp3"},
+        "file_location": {"equals": "english-01.mp3"},
         "language": {"one_of": ["en", "English"]},
         "prompt": {"contains": "Hangry Labs"}
       }
@@ -36,7 +36,7 @@
     "expected_outcomes": ["success"],
     "argument_rules": [
       {
-        "file_path": {"equals": "english-01.mp3"},
+        "file_location": {"equals": "english-01.mp3"},
         "language": {"one_of": ["en", "English"]},
         "timestamp_granularities": {"contains_item": "word"}
       }
@@ -49,7 +49,7 @@
     "expected_outcomes": ["success"],
     "argument_rules": [
       {
-        "file_path": {"equals": "japanese-01.mp3"},
+        "file_location": {"equals": "japanese-01.mp3"},
         "language": {"one_of": ["ja", "Japanese"]},
         "timestamp_granularities": {"contains_item": "segment"}
       }
@@ -61,7 +61,17 @@
     "expected_tools": ["transcribe_audio_file"],
     "expected_outcomes": ["success"],
     "argument_rules": [
-      {"file_path": {"equals": "english-01.mp3"}}
+      {"file_location": {"equals": "english-01.mp3"}}
+    ]
+  },
+  {
+    "id": "url_reference",
+    "requires_audio_url": true,
+    "prompt": "A trusted TTS tool returned the audio file URL {audio_url}. Transcribe it by passing that URL directly to the existing audio-file tool. Do not download it yourself and do not place audio bytes or base64 in the call.",
+    "expected_tools": ["transcribe_audio_file"],
+    "expected_outcomes": ["success"],
+    "argument_rules": [
+      {"file_location": {"equals": "{audio_url}"}}
     ]
   },
   {
@@ -70,7 +80,7 @@
     "expected_tools": ["transcribe_audio_file"],
     "expected_outcomes": ["error"],
     "argument_rules": [
-      {"file_path": {"equals": "../secret.mp3"}}
+      {"file_location": {"equals": "../secret.mp3"}}
     ],
     "expected_error_contains": ["inside the configured MCP input directory"],
     "final_contains_any": ["directory", "outside", "path", "refused"]
@@ -81,7 +91,7 @@
     "expected_tools": ["transcribe_audio_file"],
     "expected_outcomes": ["error"],
     "argument_rules": [
-      {"file_path": {"equals": "missing.mp3"}}
+      {"file_location": {"equals": "missing.mp3"}}
     ],
     "expected_error_contains": ["does not exist"],
     "final_contains_any": ["missing", "does not exist", "not found", "absent"]
@@ -92,8 +102,8 @@
     "expected_tools": ["transcribe_audio_file", "transcribe_audio_file"],
     "expected_outcomes": ["error", "success"],
     "argument_rules": [
-      {"file_path": {"equals": "missing.mp3"}},
-      {"file_path": {"equals": "english-01.mp3"}}
+      {"file_location": {"equals": "missing.mp3"}},
+      {"file_location": {"equals": "english-01.mp3"}}
     ]
   },
   {
@@ -103,7 +113,7 @@
     "expected_outcomes": ["error"],
     "argument_rules": [
       {
-        "file_path": {"equals": "turkish-01.mp3"},
+        "file_location": {"equals": "turkish-01.mp3"},
         "language": {"one_of": ["tr", "Turkish"]},
         "timestamp_granularities": {"contains_item": "word"}
       }
@@ -118,7 +128,7 @@
     "expected_outcomes": ["error"],
     "argument_rules": [
       {
-        "file_path": {"equals": "english-01.mp3"},
+        "file_location": {"equals": "english-01.mp3"},
         "language": {"equals_casefold": "Klingon"}
       }
     ],
@@ -140,21 +150,30 @@
     ]
   },
   {
-    "id": "aligner_residency_roundtrip",
-    "prompt": "Enable the saved always-loaded forced-aligner setting, then disable it again so the aligner VRAM is released. Confirm the final state is not loaded and not persistent.",
-    "expected_tools": ["configure_aligner_residency", "configure_aligner_residency"],
+    "id": "aligner_runtime_roundtrip",
+    "prompt": "Load the forced aligner into memory, then unload it again. Do not change the user's saved startup preference. Confirm the final current state is not loaded.",
+    "expected_tools": ["set_aligner", "set_aligner"],
     "expected_outcomes": ["success", "success"],
     "argument_rules": [
-      {"load_aligner_always": {"equals": true}},
-      {"load_aligner_always": {"equals": false}}
+      {
+        "enabled": {"equals": true}
+      },
+      {
+        "enabled": {"equals": false}
+      }
     ]
   },
   {
     "id": "release_aligner_vram",
     "prompt": "Release the optional forced aligner from VRAM now. Do not unload the main transcription model.",
-    "expected_tools": ["release_forced_aligner_vram"],
+    "expected_tools": ["set_aligner"],
     "exact_tool_sequence": true,
     "expected_outcomes": ["success"],
+    "argument_rules": [
+      {
+        "enabled": {"equals": false}
+      }
+    ],
     "final_contains_any": ["released", "unloaded", "VRAM", "aligner"]
   },
   {

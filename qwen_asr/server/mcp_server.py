@@ -9,8 +9,9 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from mcp.server.mcpserver import MCPServer
@@ -27,6 +28,7 @@ from qwen_asr.server.openai_api import (
     _segments_payload,
     _words_payload,
 )
+from qwen_asr.server.remote_audio import RemoteAudioError, RemoteAudioFetcher
 from qwen_asr.standalone_ui.gpu import GPU_MONITOR
 
 DEFAULT_MCP_INPUT_DIR = "/app/persistent/mcp-input"
@@ -50,6 +52,9 @@ DEFAULT_ALLOWED_ORIGINS = [
     "https://localhost",
     "https://localhost:*",
 ]
+DEFAULT_AUDIO_URL_ALLOWED_HOSTS = ["*"]
+DEFAULT_AUDIO_URL_TIMEOUT_SECONDS = 60.0
+DEFAULT_AUDIO_URL_MAX_REDIRECTS = 3
 TimestampGranularity = Literal["word", "segment"]
 
 
@@ -135,6 +140,26 @@ def _enabled(name: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _positive_float_setting(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
+def _nonnegative_int_setting(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value < 0:
+        raise RuntimeError(f"{name} cannot be negative")
+    return value
+
+
 def _configured_input_directory(value: str | Path | None) -> Path | None:
     if value is not None:
         raw = str(value).strip()
@@ -197,8 +222,9 @@ def create_mcp_server(
     api_app: FastAPI,
     input_directory: str | Path | None = None,
     gpu_snapshot_provider: Callable[[], dict[str, object]] | None = None,
+    audio_url_transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[MCPServer[Any], Path | None]:
-    """Build the path-only MCP surface around the product's shared runtime."""
+    """Build the path/URL MCP surface around the product's shared runtime."""
     service: TranscriptionService = api_app.state.transcription_service
     model_name = str(api_app.state.model_name)
     coordinator = api_app.state.inference_coordinator
@@ -207,6 +233,22 @@ def create_mcp_server(
     started_at = time.monotonic()
     gpu_snapshot = gpu_snapshot_provider or GPU_MONITOR.request_snapshot
     mounted_input = _configured_input_directory(input_directory)
+    audio_url_allowed_hosts = _csv_setting(
+        "QWEN_ASR_MCP_AUDIO_URL_ALLOWED_HOSTS", DEFAULT_AUDIO_URL_ALLOWED_HOSTS
+    )
+    audio_url_timeout = _positive_float_setting(
+        "QWEN_ASR_MCP_AUDIO_URL_TIMEOUT_SECONDS", DEFAULT_AUDIO_URL_TIMEOUT_SECONDS
+    )
+    audio_url_max_redirects = _nonnegative_int_setting(
+        "QWEN_ASR_MCP_AUDIO_URL_MAX_REDIRECTS", DEFAULT_AUDIO_URL_MAX_REDIRECTS
+    )
+    audio_url_fetcher = RemoteAudioFetcher(
+        max_bytes=service.max_upload_bytes,
+        allowed_hosts=audio_url_allowed_hosts,
+        timeout_seconds=audio_url_timeout,
+        max_redirects=audio_url_max_redirects,
+        transport=audio_url_transport,
+    )
     if mounted_input is not None:
         try:
             mounted_input.mkdir(parents=True, exist_ok=True)
@@ -224,20 +266,28 @@ def create_mcp_server(
             "already loaded by Qwen3-ASR STT."
         ),
         instructions=(
-            "Call get_health to inspect readiness and capabilities. Audio must already be available inside the "
-            "configured MCP input directory; call transcribe_audio_file with its relative path. Never place "
-            "audio bytes or base64 in tool arguments. Language may be omitted for automatic detection. Runtime "
-            "control tools change this deployment and should only be used when the user asks."
+            "Call get_health to inspect readiness and capabilities. Call transcribe_audio_file with file_location "
+            "set to either a local "
+            "path inside the configured MCP input directory or an HTTP(S) file URL returned by a TTS or other "
+            "file-producing tool. Never place audio bytes or base64 in tool arguments. Language may be omitted for "
+            "automatic detection. Runtime control tools change this deployment and should only be used when the "
+            "user asks."
         ),
         website_url="https://hangrylabs.app/software/qwen3-asr-stt",
         version=product_version,
     )
 
-    read_only = ToolAnnotations(
+    local_read_only = ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=False,
+    )
+    external_read_only = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
     )
     runtime_control = ToolAnnotations(
         readOnlyHint=False,
@@ -245,7 +295,6 @@ def create_mcp_server(
         idempotentHint=True,
         openWorldHint=False,
     )
-
     @mcp.tool(
         title="Get deployment health",
         description=(
@@ -253,7 +302,7 @@ def create_mcp_server(
             "aligner state, saved realtime defaults, current GPU telemetry, MCP file location, uptime, and "
             "persistent-storage capacity. This does not change runtime state."
         ),
-        annotations=read_only,
+        annotations=local_read_only,
         structured_output=True,
     )
     async def get_health() -> MCPHealthOverview:
@@ -283,56 +332,78 @@ def create_mcp_server(
                 "endpoint": "/mcp",
                 "input_directory": str(mounted_input) if mounted_input is not None else None,
                 "path_transcription_available": mounted_input is not None,
+                "url_transcription_available": audio_url_fetcher.enabled,
+                "audio_url_allowed_hosts": list(audio_url_fetcher.allowed_hosts),
+                "audio_url_timeout_seconds": audio_url_timeout,
+                "audio_url_max_redirects": audio_url_max_redirects,
             },
             gpu=list(gpu_payload.get("gpus") or []),
             persistent_storage=storage,
         )
 
-    if mounted_input is not None:
+    if mounted_input is not None or audio_url_fetcher.enabled:
 
         @mcp.tool(
-            title="Transcribe a shared audio file",
+            title="Transcribe an audio file path or URL",
             description=(
-                "Transcribe an audio file that already exists inside the configured MCP input directory. Pass "
-                "a relative path such as 'exports/video-audio.mp3'. Paths outside the directory are rejected. "
+                "Transcribe one audio reference. file_location may be a relative/absolute path that resolves inside "
+                "the configured MCP input directory, or an HTTP(S) file URL returned by a TTS or other tool. The "
+                "server retrieves URL audio directly; never fetch, embed, or base64-encode it in model context. "
                 "Optional word or segment timestamps load the forced aligner when supported."
             ),
-            annotations=read_only,
+            annotations=external_read_only,
             structured_output=True,
         )
         async def transcribe_audio_file(
-            file_path: str,
+            file_location: str,
             language: str | None = None,
             prompt: str = "",
             timestamp_granularities: list[TimestampGranularity] | None = None,
         ) -> MCPTranscriptionResult:
-            requested = Path(file_path)
-            resolved = (
-                requested if requested.is_absolute() else mounted_input / requested
-            ).resolve()
-            try:
-                resolved.relative_to(mounted_input)
-            except ValueError as exc:
-                raise ToolError(
-                    "file_path must stay inside the configured MCP input directory. Use a relative path such as "
-                    "'sample.mp3' for a file already placed or exported there."
-                ) from exc
-            if not resolved.is_file():
-                raise ToolError(
-                    "The requested audio file does not exist in the configured MCP input directory. Export, "
-                    "copy, or mount the file there, then retry with its relative path."
-                )
-            if resolved.stat().st_size > service.max_upload_bytes:
-                limit_mb = service.max_upload_bytes / (1024 * 1024)
-                raise ToolError(f"Audio exceeds the configured {limit_mb:g} MB limit")
+            reference = file_location.strip()
+            if "://" in reference:
+                try:
+                    downloaded = await audio_url_fetcher.fetch(reference)
+                except RemoteAudioError as exc:
+                    raise ToolError(str(exc)) from exc
+                payload = downloaded.payload
+                filename = downloaded.filename
+                content_type = downloaded.content_type
+            else:
+                if mounted_input is None:
+                    raise ToolError(
+                        "Local path transcription is disabled because no MCP input directory is configured. "
+                        "Pass an allowed HTTP(S) file URL instead."
+                    )
+                requested = Path(reference)
+                resolved = (
+                    requested if requested.is_absolute() else mounted_input / requested
+                ).resolve()
+                try:
+                    resolved.relative_to(mounted_input)
+                except ValueError as exc:
+                    raise ToolError(
+                        "file_location must stay inside the configured MCP input directory. Use a relative path such "
+                        "as 'sample.mp3' for a file already placed or exported there, or pass an HTTP(S) URL."
+                    ) from exc
+                if not resolved.is_file():
+                    raise ToolError(
+                        "The requested audio file does not exist in the configured MCP input directory. Export, "
+                        "copy, or mount the file there, or pass an HTTP(S) URL."
+                    )
+                if resolved.stat().st_size > service.max_upload_bytes:
+                    limit_mb = service.max_upload_bytes / (1024 * 1024)
+                    raise ToolError(f"Audio exceeds the configured {limit_mb:g} MB limit")
+                payload = await asyncio.to_thread(resolved.read_bytes)
+                filename = resolved.name
+                content_type = mimetypes.guess_type(resolved.name)[0]
 
-            payload = await asyncio.to_thread(resolved.read_bytes)
             granularities = list(dict.fromkeys(timestamp_granularities or []))
             try:
                 item = await service.transcribe_bytes(
                     payload=payload,
-                    filename=resolved.name,
-                    content_type=mimetypes.guess_type(resolved.name)[0],
+                    filename=filename,
+                    content_type=content_type,
                     language=language,
                     prompt=prompt,
                     timestamp_granularities=granularities,
@@ -344,49 +415,29 @@ def create_mcp_server(
             )
 
     @mcp.tool(
-        title="Configure forced-aligner residency",
+        title="Set forced-aligner state",
         description=(
-            "Persist whether the forced aligner should always remain loaded. true loads and warms it now and on "
-            "future startups. false disables persistent residency and releases its VRAM immediately."
+            "Set the forced aligner's current in-memory state. enabled=true loads and warms it when needed; "
+            "enabled=false unloads it and releases its VRAM. Repeating the current state does nothing. This does "
+            "not change the user's saved 'Always keep aligner loaded' startup preference, and the main "
+            "transcription model always remains loaded."
         ),
         annotations=runtime_control,
         structured_output=True,
     )
-    async def configure_aligner_residency(
-        load_aligner_always: bool,
+    async def set_aligner(
+        enabled: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Desired current in-memory state: true loads and warms the forced aligner; false unloads it "
+                    "and releases its VRAM. This does not alter the saved startup preference."
+                )
+            ),
+        ],
     ) -> dict[str, Any]:
         try:
-            return await api_app.state.configure_aligner(load_aligner_always)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
-
-    @mcp.tool(
-        title="Load the forced aligner",
-        description=(
-            "Load and fully warm the forced aligner now for word or segment timestamps. This does not change the "
-            "saved always-loaded preference. Loading can use several GiB of additional VRAM."
-        ),
-        annotations=runtime_control,
-        structured_output=True,
-    )
-    async def load_forced_aligner() -> dict[str, Any]:
-        try:
-            return await api_app.state.ensure_aligner_loaded()
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
-
-    @mcp.tool(
-        title="Release forced-aligner VRAM",
-        description=(
-            "Unload the optional forced aligner and release its VRAM. If always-loaded residency is enabled, "
-            "disable it first with configure_aligner_residency. The main transcription model remains loaded."
-        ),
-        annotations=runtime_control,
-        structured_output=True,
-    )
-    async def release_forced_aligner_vram() -> dict[str, Any]:
-        try:
-            return await api_app.state.release_aligner()
+            return await api_app.state.set_aligner_loaded(enabled)
         except HTTPException as exc:
             raise _tool_error(exc) from exc
 

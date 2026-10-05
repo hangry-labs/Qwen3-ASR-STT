@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -65,6 +66,8 @@ class FakeAlignerRuntime:
         self.asr = asr
         self.settings = settings
         self.load_always = settings.load_aligner_always()
+        self.load_calls = 0
+        self.unload_calls = 0
 
     def snapshot(self) -> dict[str, Any]:
         loaded = self.asr.forced_aligner is not None
@@ -81,10 +84,12 @@ class FakeAlignerRuntime:
         }
 
     def load(self, *, warm_up: bool = True) -> dict[str, Any]:
+        self.load_calls += 1
         self.asr.forced_aligner = object()
         return self.snapshot()
 
     def unload(self) -> dict[str, Any]:
+        self.unload_calls += 1
         self.asr.forced_aligner = None
         return self.snapshot()
 
@@ -96,6 +101,7 @@ class FakeAlignerRuntime:
 def _app(
     asr: FakeASR | None = None,
     settings_path: Path | None = None,
+    max_upload_bytes: int | None = None,
 ):
     resolved_asr = asr or FakeASR()
     settings = RuntimeSettingsStore(settings_path or Path("settings-test.json"))
@@ -105,11 +111,12 @@ def _app(
         concurrency=1,
         enable_watchdog=False,
         aligner_runtime=FakeAlignerRuntime(resolved_asr, settings),
+        max_upload_bytes=max_upload_bytes,
     )
 
 
 class MCPServerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_path_only_tools_expose_health_transcription_and_controls(self) -> None:
+    async def test_tools_expose_health_transcription_and_controls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             app = _app(settings_path=root / "settings.json")
@@ -122,7 +129,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-            tools = {tool.name for tool in await server.list_tools()}
+            listed_tools = await server.list_tools()
+            tools = {tool.name for tool in listed_tools}
+            transcription_tool = next(
+                tool for tool in listed_tools if tool.name == "transcribe_audio_file"
+            )
             health = await server.call_tool("get_health", {})
 
         self.assertEqual(
@@ -130,19 +141,33 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             {
                 "get_health",
                 "transcribe_audio_file",
-                "configure_aligner_residency",
-                "load_forced_aligner",
-                "release_forced_aligner_vram",
+                "set_aligner",
                 "configure_realtime_defaults",
             },
         )
         self.assertNotIn("transcribe_audio", tools)
+        self.assertNotIn("configure_aligner_residency", tools)
+        self.assertNotIn("load_forced_aligner", tools)
+        self.assertNotIn("release_forced_aligner_vram", tools)
+        properties = transcription_tool.input_schema["properties"]
+        self.assertIn("file_location", properties)
+        self.assertNotIn("file_path", properties)
+        aligner_tool = next(tool for tool in listed_tools if tool.name == "set_aligner")
+        self.assertEqual(
+            set(aligner_tool.input_schema["required"]),
+            {"enabled"},
+        )
+        aligner_properties = aligner_tool.input_schema["properties"]
+        self.assertEqual(set(aligner_properties), {"enabled"})
+        self.assertIn("true loads", aligner_properties["enabled"]["description"])
+        self.assertTrue(aligner_tool.annotations.idempotent_hint)
         self.assertFalse(health.is_error)
         self.assertEqual(health.structured_content["status"], "ok")
         self.assertEqual(health.structured_content["product"]["version"], "1.1-snapshot")
         self.assertEqual(health.structured_content["gpu"][0]["name"], "Test GPU")
         self.assertIn("inference", health.structured_content)
         self.assertIn("persistent_storage", health.structured_content)
+        self.assertTrue(health.structured_content["mcp"]["url_transcription_available"])
 
     async def test_mounted_file_tool_uses_shared_transcription_service_and_timestamps(
         self,
@@ -158,7 +183,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             result = await server.call_tool(
                 "transcribe_audio_file",
                 {
-                    "file_path": "sample.wav",
+                    "file_location": "sample.wav",
                     "language": "en",
                     "prompt": "domain vocabulary",
                     "timestamp_granularities": ["word", "segment"],
@@ -184,18 +209,156 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             )
 
             accepted = await server.call_tool(
-                "transcribe_audio_file", {"file_path": "sample.wav"}
+                "transcribe_audio_file", {"file_location": "sample.wav"}
             )
             with self.assertRaisesRegex(ToolError, "must stay inside"):
                 await server.call_tool(
-                    "transcribe_audio_file", {"file_path": "../outside.wav"}
+                    "transcribe_audio_file", {"file_location": "../outside.wav"}
                 )
 
         self.assertFalse(accepted.is_error)
 
+    async def test_file_tool_accepts_http_url_and_validates_redirects(self) -> None:
+        requests: list[str] = []
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            if request.url.path == "/generated":
+                return httpx.Response(302, headers={"Location": "/generated.wav"})
+            return httpx.Response(
+                200,
+                content=b"fake generated audio bytes",
+                headers={"Content-Type": "audio/wav"},
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            asr = FakeASR()
+            server, _ = create_mcp_server(
+                api_app=_app(asr, Path(directory) / "settings.json"),
+                input_directory=Path(directory) / "input",
+                audio_url_transport=httpx.MockTransport(handle),
+            )
+
+            result = await server.call_tool(
+                "transcribe_audio_file",
+                {
+                    "file_location": "http://127.0.0.1/generated",
+                    "language": "English",
+                },
+            )
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["text"], "hello from mcp")
+        self.assertEqual(
+            requests,
+            ["http://127.0.0.1/generated", "http://127.0.0.1/generated.wav"],
+        )
+        self.assertEqual(asr.calls[0]["language"], "English")
+
+    async def test_file_tool_rejects_unsafe_or_oversized_urls(self) -> None:
+        def oversized(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"123456789", headers={"Content-Type": "audio/wav"})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server, _ = create_mcp_server(
+                api_app=_app(settings_path=root / "settings.json", max_upload_bytes=8),
+                input_directory=root / "input",
+                audio_url_transport=httpx.MockTransport(oversized),
+            )
+
+            with self.assertRaisesRegex(ToolError, "must use http"):
+                await server.call_tool(
+                    "transcribe_audio_file",
+                    {"file_location": "ftp://127.0.0.1/audio.wav"},
+                )
+            with self.assertRaisesRegex(ToolError, "must not contain embedded credentials"):
+                await server.call_tool(
+                    "transcribe_audio_file",
+                    {"file_location": "http://user:secret@127.0.0.1/audio.wav"},
+                )
+            with self.assertRaisesRegex(ToolError, "link-local"):
+                await server.call_tool(
+                    "transcribe_audio_file",
+                    {"file_location": "http://169.254.169.254/audio.wav"},
+                )
+            with self.assertRaisesRegex(ToolError, "exceeds the configured"):
+                await server.call_tool(
+                    "transcribe_audio_file",
+                    {"file_location": "http://127.0.0.1/audio.wav"},
+                )
+
+    async def test_file_tool_revalidates_redirect_destination(self) -> None:
+        requests: list[str] = []
+
+        def redirect_to_metadata(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            return httpx.Response(
+                302,
+                headers={"Location": "http://169.254.169.254/latest/meta-data"},
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server, _ = create_mcp_server(
+                api_app=_app(settings_path=root / "settings.json"),
+                input_directory=root / "input",
+                audio_url_transport=httpx.MockTransport(redirect_to_metadata),
+            )
+
+            with self.assertRaisesRegex(ToolError, "link-local"):
+                await server.call_tool(
+                    "transcribe_audio_file",
+                    {"file_location": "http://127.0.0.1/audio.wav"},
+                )
+
+        self.assertEqual(requests, ["http://127.0.0.1/audio.wav"])
+
+    async def test_file_tool_respects_url_host_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(
+                "os.environ",
+                {"QWEN_ASR_MCP_AUDIO_URL_ALLOWED_HOSTS": "tts.internal:8080"},
+            ):
+                server, _ = create_mcp_server(
+                    api_app=_app(settings_path=root / "settings.json"),
+                    input_directory=root / "input",
+                )
+
+            with self.assertRaisesRegex(ToolError, "host is not allowed"):
+                await server.call_tool(
+                    "transcribe_audio_file",
+                    {"file_location": "http://127.0.0.1/audio.wav"},
+                )
+
+    async def test_file_tool_remains_available_for_url_only_configuration(self) -> None:
+        def audio_response(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"remote audio", headers={"Content-Type": "audio/wav"})
+
+        with tempfile.TemporaryDirectory() as directory:
+            asr = FakeASR()
+            server, configured = create_mcp_server(
+                api_app=_app(asr, Path(directory) / "settings.json"),
+                input_directory="",
+                audio_url_transport=httpx.MockTransport(audio_response),
+            )
+
+            tools = {tool.name for tool in await server.list_tools()}
+            result = await server.call_tool(
+                "transcribe_audio_file",
+                {"file_location": "http://127.0.0.1/generated.wav"},
+            )
+
+        self.assertIsNone(configured)
+        self.assertIn("transcribe_audio_file", tools)
+        self.assertFalse(result.is_error)
+        self.assertEqual(len(asr.calls), 1)
+
     async def test_runtime_controls_persist_defaults_and_manage_aligner(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings_path = Path(directory) / "settings.json"
+            RuntimeSettingsStore(settings_path).set_load_aligner_always(True)
             app = _app(settings_path=settings_path)
             server, _ = create_mcp_server(
                 api_app=app,
@@ -212,25 +375,37 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                     "unfixed_token_num": 8,
                 },
             )
-            loaded = await server.call_tool("load_forced_aligner", {})
-            persistent = await server.call_tool(
-                "configure_aligner_residency", {"load_aligner_always": True}
+            enabled = await server.call_tool(
+                "set_aligner",
+                {"enabled": True},
             )
-            with self.assertRaisesRegex(ToolError, "Disable 'Always keep aligner loaded'"):
-                await server.call_tool("release_forced_aligner_vram", {})
-            released = await server.call_tool(
-                "configure_aligner_residency", {"load_aligner_always": False}
+            unchanged_while_loaded = await server.call_tool(
+                "set_aligner",
+                {"enabled": True},
+            )
+            disabled = await server.call_tool(
+                "set_aligner",
+                {"enabled": False},
+            )
+            unchanged_while_unloaded = await server.call_tool(
+                "set_aligner",
+                {"enabled": False},
             )
 
             persisted = RuntimeSettingsStore(settings_path)
             persisted_load_always = persisted.load_aligner_always()
             persisted_realtime = persisted.realtime_defaults()
+            aligner_runtime = app.state.aligner_runtime
 
         self.assertEqual(defaults.structured_content["realtime_defaults"]["max_window_sec"], 20.0)
-        self.assertTrue(loaded.structured_content["loaded"])
-        self.assertTrue(persistent.structured_content["load_always"])
-        self.assertFalse(released.structured_content["loaded"])
-        self.assertFalse(persisted_load_always)
+        self.assertTrue(enabled.structured_content["loaded"])
+        self.assertTrue(enabled.structured_content["load_always"])
+        self.assertTrue(unchanged_while_loaded.structured_content["loaded"])
+        self.assertFalse(disabled.structured_content["loaded"])
+        self.assertFalse(unchanged_while_unloaded.structured_content["loaded"])
+        self.assertEqual(aligner_runtime.load_calls, 1)
+        self.assertEqual(aligner_runtime.unload_calls, 1)
+        self.assertTrue(persisted_load_always)
         self.assertEqual(persisted_realtime["unfixed_token_num"], 8)
 
     async def test_mounted_file_directory_is_created_for_existing_volume_migration(

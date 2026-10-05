@@ -211,8 +211,8 @@ http://localhost:8000/mcp
 Available tools:
 
 - `get_health` reports inference readiness and metrics, model and product versions, uptime, forced-aligner state, saved realtime defaults, current GPU telemetry, persistent-storage capacity, supported languages, and the shared file location.
-- `transcribe_audio_file` reads a file only from `/app/persistent/mcp-input` by default. Both relative and absolute paths are accepted when they resolve inside that directory; traversal and every path outside it are rejected. Optional language, prompt/context, and word/segment timestamps are supported.
-- `configure_aligner_residency`, `load_forced_aligner`, and `release_forced_aligner_vram` mirror the forced-aligner controls in System.
+- `transcribe_audio_file` accepts one `file_location`: either a relative/absolute path that resolves inside `/app/persistent/mcp-input` by default, or an `http://`/`https://` file URL. Optional language, prompt/context, and word/segment timestamps are supported.
+- `set_aligner` accepts one required `enabled` boolean: `true` loads and warms the aligner, while `false` unloads it and releases its VRAM. It controls only the current in-memory state and does not change the user's saved **Always keep aligner loaded** startup preference. The main transcription model remains loaded.
 - `configure_realtime_defaults` validates and persists the same bounded-window defaults as the System tab.
 
 To make a local file available through the existing persistent volume:
@@ -221,9 +221,13 @@ To make a local file available through the existing persistent volume:
 docker cp sample.mp3 qwen3-asr-stt:/app/persistent/mcp-input/sample.mp3
 ```
 
-The mounted-file tool can then use `sample.mp3`. An agent can likewise export audio from another local workflow directly into this shared directory and pass the resulting path. Set `QWEN_ASR_MCP_INPUT_DIR` to another container directory when using a bind mount, or set it to an empty value to omit the transcription tool. MCP intentionally accepts paths only: audio bytes and base64 are never placed in model-visible tool arguments, and MCP never downloads arbitrary audio URLs.
+The same tool can then use `file_location="sample.mp3"`. An agent can also pass a file URL returned by another tool, such as `file_location="http://tts:8000/generated/example.wav"`; Qwen3-ASR STT retrieves the file directly. In both forms, only the small location string enters model context—audio bytes and base64 never do.
 
-To measure health discovery, path transcription, runtime controls, and error recovery with a local OpenAI-compatible chat model, use the reusable [local AI MCP test](testbench/local_ai_test/README.md). It discovers and exercises the live MCP schemas.
+Local paths must be visible inside the Qwen3-ASR STT container and remain confined to the configured input directory. Set `QWEN_ASR_MCP_INPUT_DIR` to another mounted container directory, or to an empty value to disable local-path input while retaining URL input. URL downloads use the same upload-size limit, a 60-second timeout, and at most three redirects; every redirect is validated. Link-local, reserved, multicast, and unspecified destinations and URLs with embedded credentials are rejected. Private and loopback destinations remain available for local Docker and LAN integrations.
+
+`QWEN_ASR_MCP_AUDIO_URL_ALLOWED_HOSTS` defaults to `*` for plug-and-play tool chaining. On a shared deployment, restrict it to exact comma-separated TTS hosts such as `tts:8000,media.example.test`, use `*.example.test` for a deliberate subdomain wildcard, or set it to an empty value to disable URL input. A URL must be reachable from the ASR container: use a Docker service name, LAN address, or `host.docker.internal` rather than `localhost` when the file server runs in another container or on the host.
+
+To measure health discovery, path/URL transcription, runtime controls, and error recovery with a local OpenAI-compatible chat model, use the reusable [local AI MCP test](testbench/local_ai_test/README.md). It discovers and exercises the live MCP schemas.
 
 DNS-rebinding protection allows localhost by default. When an MCP client connects through another hostname or IP address, add the exact HTTP `Host` values as a comma-separated `QWEN_ASR_MCP_ALLOWED_HOSTS` setting, for example `server.example.test:8000`. Clients that send an `Origin` header also need their exact origins in `QWEN_ASR_MCP_ALLOWED_ORIGINS`. Keep these allowlists narrow; disabling `QWEN_ASR_MCP_DNS_REBINDING_PROTECTION` is intended only for an already protected private network.
 
@@ -349,7 +353,10 @@ Common environment variables:
 | `QWEN_ASR_INFERENCE_QUEUE_TIMEOUT_SECONDS` | `120` | Maximum wait for the single engine owner |
 | `QWEN_ASR_REALTIME_SESSION_TTL_SECONDS` | `900` | Idle realtime session expiry |
 | `QWEN_ASR_ENABLE_MCP` | `0` | Initial MCP availability for a new settings volume; the persisted System toggle takes precedence afterward |
-| `QWEN_ASR_MCP_INPUT_DIR` | `/app/persistent/mcp-input` | Only directory available to the mounted-file MCP tool; empty disables that tool |
+| `QWEN_ASR_MCP_INPUT_DIR` | `/app/persistent/mcp-input` | Only directory available to MCP local-path input; empty disables local paths |
+| `QWEN_ASR_MCP_AUDIO_URL_ALLOWED_HOSTS` | `*` | Comma-separated URL hosts accepted by `file_location`; empty disables URL input |
+| `QWEN_ASR_MCP_AUDIO_URL_TIMEOUT_SECONDS` | `60` | Total timeout for an MCP audio URL download |
+| `QWEN_ASR_MCP_AUDIO_URL_MAX_REDIRECTS` | `3` | Maximum redirects followed for an MCP audio URL |
 | `QWEN_ASR_MCP_DNS_REBINDING_PROTECTION` | `1` | Validate MCP `Host` and `Origin` headers |
 | `QWEN_ASR_MCP_ALLOWED_HOSTS` | localhost addresses | Comma-separated exact hosts accepted by MCP, with `:*` supported for any port |
 | `QWEN_ASR_MCP_ALLOWED_ORIGINS` | localhost HTTP/HTTPS origins | Comma-separated origins accepted by MCP |
@@ -515,8 +522,8 @@ Snapshot commands intentionally follow the rolling `latest` tags. Published-rele
 
 ### v1.1 Snapshot
 
-- Added an opt-in MCP Streamable HTTP endpoint to both Docker variants without loading another model. Its path-only transcription tool confines files to a configurable shared directory, while structured health and control tools expose inference/GPU state, forced-aligner lifecycle, and persistent realtime defaults. It reuses the REST API's inference and alignment boundary, enforces the same 100 MB limit, retains DNS-rebinding protection, and creates the input directory for existing persistent volumes.
-- Added a repeatable local-chat-model MCP tool-use benchmark covering health discovery, path-only transcription, argument accuracy, timestamps, runtime controls, security errors, and retry recovery with Qwen 3.6 35B-A3B Q4_K_M.
+- Added an opt-in MCP Streamable HTTP endpoint to both Docker variants without loading another model. Its single `transcribe_audio_file(file_location=...)` tool accepts either a confined local path or a bounded HTTP(S) file URL, while structured health and control tools expose inference/GPU state, forced-aligner lifecycle, and persistent realtime defaults. It reuses the REST API's inference and alignment boundary, enforces the same 100 MB limit, retains DNS-rebinding protection, and creates the input directory for existing persistent volumes.
+- Added a repeatable local-chat-model MCP tool-use benchmark covering health discovery, path/URL transcription, argument accuracy, timestamps, runtime controls, security errors, and retry recovery with Qwen 3.6 35B-A3B Q4_K_M.
 
 The current development snapshot is published through the rolling tags from `main`:
 

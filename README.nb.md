@@ -23,7 +23,7 @@ Denne Hangry Labs-versjonen er laget for lokal inferens. Du kan starte én conta
 
 - Lokalt nettlesergrensesnitt for opplasting, opptak og direktetranskripsjon fra mikrofon
 - OpenAI-kompatibelt endepunkt: `/v1/audio/transcriptions`
-- Valgfri Streamable HTTP MCP-server på `/mcp` med helsestatus, transkripsjon fra delte filbaner og systemkontroller
+- Valgfri Streamable HTTP MCP-server på `/mcp` med helsestatus, transkripsjon fra delte filbaner eller HTTP(S)-URL-er og systemkontroller
 - Flerspråklig transkripsjon og automatisk språkregistrering
 - Valgfrie tidsstempler på ord- og segmentnivå
 - GPU-overvåking og vedvarende innstillinger

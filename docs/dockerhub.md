@@ -172,13 +172,17 @@ The local server does not authenticate the placeholder `api_key="local"`. Keep i
 
 Both image variants include opt-in stateless MCP Streamable HTTP at `http://localhost:8000/mcp`. Enable **MCP connectivity** in the System tab on a trusted deployment first. It runs inside the same process and shares the loaded model, inference queue, upload limit, GPU monitor, settings, and on-demand aligner with the UI and REST API.
 
-`get_health` reports the deployment, inference metrics, aligner, realtime defaults, current GPU telemetry, storage, and shared directory. `transcribe_audio_file` accepts optional language, prompt/context, and timestamps but is confined to `/app/persistent/mcp-input` by default. Runtime controls can persist aligner residency and realtime defaults, load the aligner, or release its VRAM. Make a file available with:
+`get_health` reports the deployment, inference metrics, aligner, realtime defaults, current GPU telemetry, storage, and shared directory. `transcribe_audio_file` accepts one `file_location`, which may be a path confined to `/app/persistent/mcp-input` by default or an HTTP(S) file URL. It also accepts optional language, prompt/context, and timestamps. `set_aligner(enabled)` controls only the current in-memory state: `true` loads and warms the aligner, while `false` unloads it and releases its VRAM without changing the user's saved startup preference. Realtime defaults can also be persisted. Make a local file available with:
 
 ```bash
 docker cp sample.mp3 qwen3-asr-stt:/app/persistent/mcp-input/sample.mp3
 ```
 
-Set `QWEN_ASR_MCP_INPUT_DIR` to another mounted container directory or to an empty value to omit the transcription tool. The default directory is created automatically for existing persistent volumes. MCP accepts path references only; base64 arguments and arbitrary URL fetching are intentionally unsupported. Localhost is accepted by the MCP DNS-rebinding guard by default; add exact comma-separated LAN or reverse-proxy host values with `QWEN_ASR_MCP_ALLOWED_HOSTS`, and origins for clients that send an `Origin` header with `QWEN_ASR_MCP_ALLOWED_ORIGINS`. While disabled, MCP returns `403 Forbidden` because its use has not been authorized by the deployment owner. The enable switch prevents accidental exposure but is not an authentication system.
+The tool can use `file_location="sample.mp3"` or pass through a URL returned by another tool, such as `file_location="http://tts:8000/generated/example.wav"`. Only the location enters model context; audio bytes and base64 never do. Set `QWEN_ASR_MCP_INPUT_DIR` to another mounted container directory or to an empty value to disable local paths while retaining URLs. The default directory is created automatically for existing persistent volumes.
+
+URL retrieval uses the same file-size limit, a bounded timeout and redirect count, validates every redirect, and rejects embedded credentials plus link-local, reserved, multicast, and unspecified destinations. It allows private/loopback addresses for local integrations. `QWEN_ASR_MCP_AUDIO_URL_ALLOWED_HOSTS` defaults to `*`; restrict it to exact comma-separated TTS hosts on shared deployments, or set it to an empty value to disable URL input. The URL must be reachable from inside the ASR container.
+
+Localhost is accepted by the MCP endpoint's DNS-rebinding guard by default; add exact comma-separated LAN or reverse-proxy host values with `QWEN_ASR_MCP_ALLOWED_HOSTS`, and origins for clients that send an `Origin` header with `QWEN_ASR_MCP_ALLOWED_ORIGINS`. While disabled, MCP returns `403 Forbidden` because its use has not been authorized by the deployment owner. The enable switch prevents accidental exposure but is not an authentication system.
 
 Useful routes:
 
@@ -265,6 +269,9 @@ Common knobs:
 - `QWEN_ASR_REALTIME_SESSION_TTL_SECONDS=900`
 - `QWEN_ASR_ENABLE_MCP=0`
 - `QWEN_ASR_MCP_INPUT_DIR=/app/persistent/mcp-input`
+- `QWEN_ASR_MCP_AUDIO_URL_ALLOWED_HOSTS=*`
+- `QWEN_ASR_MCP_AUDIO_URL_TIMEOUT_SECONDS=60`
+- `QWEN_ASR_MCP_AUDIO_URL_MAX_REDIRECTS=3`
 - `QWEN_ASR_MCP_DNS_REBINDING_PROTECTION=1`
 - `QWEN_ASR_MCP_ALLOWED_HOSTS=127.0.0.1:*,localhost:*,[::1]:*,host.docker.internal:*`
 - `QWEN_ASR_MCP_ALLOWED_ORIGINS=http://127.0.0.1:*,http://localhost:*,https://127.0.0.1:*,https://localhost:*`

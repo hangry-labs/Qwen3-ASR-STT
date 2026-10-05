@@ -23,7 +23,7 @@
 
 - 用于上传、录音和麦克风实时转录的本地浏览器界面
 - 兼容 OpenAI 的 `/v1/audio/transcriptions` 端点
-- 位于 `/mcp` 的可选 Streamable HTTP MCP 服务器，支持健康检查、共享路径转录和系统控制
+- 位于 `/mcp` 的可选 Streamable HTTP MCP 服务器，支持健康检查、共享路径或 HTTP(S) URL 转录和系统控制
 - 多语言转录和自动语言检测
 - 可选的单词级和片段级时间戳
 - GPU 监控和持久化设置

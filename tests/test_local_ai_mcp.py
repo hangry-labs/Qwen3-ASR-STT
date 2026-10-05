@@ -4,6 +4,7 @@ import unittest
 
 from testbench.local_ai_test.run import (
     _redact_opaque_text,
+    _replace_audio_url,
     _score,
 )
 
@@ -17,18 +18,18 @@ class LocalAIToolUseHarnessTests(unittest.TestCase):
         self.assertIn("redacted opaque value: 5000 characters", redacted)
         self.assertNotIn("A" * 256, redacted)
 
-    def test_score_accepts_expected_path_tool_arguments(self) -> None:
+    def test_score_accepts_expected_file_location_arguments(self) -> None:
         case = {
             "expected_tools": ["transcribe_audio_file"],
             "expected_outcomes": ["success"],
-            "argument_rules": [{"file_path": {"equals": "sample.mp3"}}],
+            "argument_rules": [{"file_location": {"equals": "sample.mp3"}}],
         }
         result = {
             "invocations": [
                 {
                     "name": "transcribe_audio_file",
                     "outcome": "success",
-                    "arguments": {"file_path": "sample.mp3"},
+                    "arguments": {"file_location": "sample.mp3"},
                     "error": None,
                 }
             ],
@@ -38,6 +39,25 @@ class LocalAIToolUseHarnessTests(unittest.TestCase):
         score = _score(case, result)
 
         self.assertTrue(score["passed"], score["failures"])
+
+    def test_audio_url_placeholder_is_replaced_in_prompt_and_rules(self) -> None:
+        case = {
+            "prompt": "Transcribe {audio_url}",
+            "argument_rules": [
+                {"file_location": {"equals": "{audio_url}"}},
+            ],
+        }
+
+        replaced = _replace_audio_url(case, "http://tts:8000/generated.wav")
+
+        self.assertEqual(
+            replaced["prompt"],
+            "Transcribe http://tts:8000/generated.wav",
+        )
+        self.assertEqual(
+            replaced["argument_rules"][0]["file_location"]["equals"],
+            "http://tts:8000/generated.wav",
+        )
 
 
 if __name__ == "__main__":

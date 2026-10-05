@@ -23,7 +23,7 @@ Ta wersja Hangry Labs została przygotowana do lokalnego wnioskowania. Uruchom j
 
 - Lokalny interfejs do przesyłania plików, nagrywania i transkrypcji mikrofonu w czasie rzeczywistym
 - Zgodny z OpenAI punkt końcowy `/v1/audio/transcriptions`
-- Opcjonalny serwer MCP Streamable HTTP pod `/mcp` ze stanem wdrożenia, transkrypcją ze współdzielonych ścieżek i kontrolą systemu
+- Opcjonalny serwer MCP Streamable HTTP pod `/mcp` ze stanem wdrożenia, transkrypcją ze współdzielonych ścieżek lub adresów URL HTTP(S) i kontrolą systemu
 - Wielojęzyczna transkrypcja i automatyczne rozpoznawanie języka
 - Opcjonalne znaczniki czasu dla słów i segmentów
 - Monitorowanie GPU i trwałe ustawienia

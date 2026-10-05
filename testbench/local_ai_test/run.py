@@ -21,9 +21,19 @@ DEFAULT_OUTPUT = ROOT / "testbench" / "results" / "local-ai-mcp-latest.json"
 
 SYSTEM_PROMPT = """You are an agent using a local speech-to-text MCP server.
 Use the available tools when the request requires deployment health, transcription, or an explicitly requested runtime setting change.
-Audio must already exist in the server's shared MCP input directory. Pass only its path; never place audio bytes or base64 in tool arguments.
+Pass audio through file_location as either a path in the server's shared MCP input directory or an HTTP(S) URL returned by another tool. Never place audio bytes or base64 in tool arguments.
 Never invent a transcription or tool result. If a tool returns an error, explain it accurately. Retry only when the user supplied an explicit valid fallback.
 Do not change runtime settings unless the user explicitly requests the change. Do not add unsupported arguments."""
+
+
+def _replace_audio_url(value: Any, audio_url: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_audio_url(item, audio_url) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_audio_url(item, audio_url) for item in value]
+    if isinstance(value, str):
+        return value.replace("{audio_url}", audio_url)
+    return value
 
 
 def _post_json(
@@ -367,6 +377,15 @@ async def _main(args: argparse.Namespace) -> int:
         if unknown:
             raise ValueError(f"Unknown case IDs: {', '.join(unknown)}")
         cases = [case for case in cases if case["id"] in requested]
+    url_cases = [case for case in cases if case.get("requires_audio_url")]
+    if url_cases and not args.audio_url:
+        if args.case_ids:
+            raise ValueError("--audio-url is required for the selected URL-reference case")
+        skipped = ", ".join(str(case["id"]) for case in url_cases)
+        print(f"Skipping URL-reference cases without --audio-url: {skipped}", flush=True)
+        cases = [case for case in cases if not case.get("requires_audio_url")]
+    elif args.audio_url:
+        cases = [_replace_audio_url(case, args.audio_url) for case in cases]
     model = args.model or await asyncio.to_thread(
         _discover_model, args.base_url, args.timeout, args.api_key
     )
@@ -455,6 +474,11 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--api-key", default=os.getenv("LOCAL_AI_API_KEY", "local"))
     parser.add_argument(
         "--mcp-url", default=os.getenv("LOCAL_MCP_URL", "http://127.0.0.1:8000/mcp")
+    )
+    parser.add_argument(
+        "--audio-url",
+        default=os.getenv("LOCAL_AI_MCP_AUDIO_URL", ""),
+        help="Reachable HTTP(S) audio URL used by URL-reference cases",
     )
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     parser.add_argument(
