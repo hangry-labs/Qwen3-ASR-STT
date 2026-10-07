@@ -50,8 +50,8 @@ h1 { max-width: 760px; margin: 0; color: var(--orange); font-size: clamp(2.5rem,
 .intro { max-width: 760px; margin: 24px 0 0; color: var(--orange-soft); font-size: clamp(1rem, 1.6vw, 1.12rem); line-height: 1.7; }
 .feature-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 .hero-logo-panel { display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; }
-.hero-logo-link { display: grid; place-items: center; width: 100%; max-width: 360px; aspect-ratio: 4 / 3; padding: 10px; border: 2px solid rgba(255, 107, 0, 0.3); border-radius: 18px; background: rgba(5, 5, 5, 0.72); box-shadow: 0 0 28px rgba(255, 107, 0, 0.22), 0 0 80px rgba(255, 60, 0, 0.14); transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease; }
-.hero-logo-link:hover, .hero-logo-link:focus-visible { border-color: var(--orange); outline: none; transform: translateY(-3px); box-shadow: 0 0 36px rgba(255, 107, 0, 0.34), 0 0 90px rgba(255, 60, 0, 0.18); }
+.hero-logo-link { display: grid; place-items: center; width: 100%; max-width: 360px; aspect-ratio: 4 / 3; text-decoration: none; }
+.hero-logo-link:focus-visible { outline: 2px solid var(--orange); outline-offset: 4px; }
 .hero-logo { display: block; width: 100%; height: auto; object-fit: contain; }
 .hero-site-link { width: min(360px, 100%); margin-top: 6px; color: #ff9b45; font-size: 0.78rem; font-weight: 750; text-align: center; text-decoration: none; text-shadow: 0 0 10px rgba(255, 107, 0, 0.5); animation: site-link-pulse 2.4s ease-in-out infinite; }
 
@@ -105,7 +105,7 @@ audio { display: none; }
   .volume-control { flex: 1 1 auto; }
   .volume-slider { flex: 1; min-width: 70px; }
   .hero { gap: 24px; padding-bottom: 34px; }
-  .hero-logo-link { max-width: 220px; padding: 7px; }
+  .hero-logo-link { max-width: 220px; }
   .example-grid { grid-template-columns: 1fr; }
   .language-filter { flex-wrap: nowrap; margin-right: -12px; padding-right: 12px; overflow-x: auto; scrollbar-width: thin; }
   .filter-button { flex: 0 0 auto; }
