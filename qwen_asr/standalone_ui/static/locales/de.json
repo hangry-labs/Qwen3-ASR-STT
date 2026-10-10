@@ -3,6 +3,8 @@
   "brand.mascotAlt": "Qwen3-ASR-STT-Maskottchen",
   "brand.productAlt": "Qwen3-ASR-STT – lokale Spracherkennung, Browser-Oberfläche und API",
   "brand.poweredBy": "Bereitgestellt von",
+  "brand.contactUs": "Kontakt:",
+  "brand.contactEmail": "E-Mail an Hangry Labs: contact@hangrylabs.app",
   "nav.aria": "Anwendungslinks",
   "nav.examples": "Beispiele",
   "nav.apiDocs": "API-Dokumentation",

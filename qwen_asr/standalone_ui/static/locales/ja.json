@@ -3,6 +3,8 @@
   "brand.mascotAlt": "Qwen3-ASR-STT マスコット",
   "brand.productAlt": "Qwen3-ASR-STT — ローカル音声認識、ブラウザーUI、API",
   "brand.poweredBy": "提供",
+  "brand.contactUs": "お問い合わせ:",
+  "brand.contactEmail": "Hangry Labsへメール: contact@hangrylabs.app",
   "nav.aria": "アプリケーションリンク",
   "nav.examples": "例",
   "nav.apiDocs": "APIドキュメント",
