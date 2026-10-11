@@ -51,6 +51,13 @@ ENTRYPOINT = _load_entrypoint_module()
 
 
 class DockerEntrypointTests(unittest.TestCase):
+    def test_runtime_image_avoids_optional_flashinfer_sampler_jit_by_default(self):
+        dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("VLLM_USE_FLASHINFER_SAMPLER=0", dockerfile)
+
     def test_backend_kwargs_default_to_vllm_gpu_profile(self):
         with patch.dict(os.environ, {}, clear=True):
             kwargs = ENTRYPOINT._backend_kwargs("vllm")

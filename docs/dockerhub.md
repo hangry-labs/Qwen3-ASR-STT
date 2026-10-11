@@ -255,6 +255,7 @@ Common knobs:
 - `QWEN_ASR_MAX_NUM_BATCHED_TOKENS=2048`
 - `QWEN_ASR_MAX_NUM_SEQS=2`
 - `QWEN_ASR_VLLM_DTYPE=bfloat16`
+- `VLLM_USE_FLASHINFER_SAMPLER=0`
 - `QWEN_ASR_TRANSFORMERS_DTYPE=bfloat16`
 - `QWEN_ASR_TRANSFORMERS_DEVICE_MAP=cuda:0`
 - `QWEN_ASR_TORCH_COMPILE=1`
@@ -284,6 +285,8 @@ Common knobs:
 The System tab persists `mcp_enabled`, `load_aligner_always`, and the realtime `chunk_size_sec`, `max_window_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. `max_window_sec` accepts 10â€“60 seconds and defaults to 30. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
 
 Startup warmup intentionally makes `/health` wait until vLLM compilation, CUDA graph capture, and three representative decode passes have stabilized the normal generation path. The first API transcription after readiness therefore does not pay lazy initialization cost.
+
+The image uses vLLM's native sampler by default because transcription decoding is deterministic and does not benefit from FlashInfer's optional top-k/top-p sampling JIT. This also avoids startup failures on NAS and alternative NVIDIA container runtimes that provide the versioned CUDA driver library but not its unversioned linker name. Set `VLLM_USE_FLASHINFER_SAMPLER=1` only to opt into that optional JIT path explicitly. For an older image exhibiting `Ninja build failed` followed by `cannot find -lcuda`, add `VLLM_USE_FLASHINFER_SAMPLER=0` to the container environment.
 
 All API, realtime, UI, warmup, and watchdog inference shares one synchronous model owner. If inference exceeds its deadline or generation fails fatally, `/health` and `/health/ready` change to HTTP 503 and the process exits after recording diagnostics. Keep the documented `--restart unless-stopped` policy, or equivalent Kubernetes/systemd supervision, so Docker reloads a clean model automatically. `/health/live` only confirms that the HTTP process is alive.
 

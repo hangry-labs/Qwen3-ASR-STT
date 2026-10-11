@@ -339,6 +339,7 @@ Common environment variables:
 | `QWEN_ASR_MAX_NUM_BATCHED_TOKENS` | `2048` | vLLM scheduler token budget |
 | `QWEN_ASR_MAX_NUM_SEQS` | `2` | vLLM scheduler sequence cap |
 | `QWEN_ASR_VLLM_DTYPE` | `bfloat16` | vLLM model dtype |
+| `VLLM_USE_FLASHINFER_SAMPLER` | `0` | Use vLLM's native sampler and avoid optional FlashInfer sampling-kernel JIT; advanced users may explicitly opt in with `1` |
 | `QWEN_ASR_BACKEND_KWARGS` | unset | JSON object with additional backend loader options |
 | `QWEN_ASR_TRANSFORMERS_DTYPE` | `bfloat16` | Transformers fallback and aligner dtype |
 | `QWEN_ASR_TRANSFORMERS_DEVICE_MAP` | `cuda:0` | Transformers fallback and aligner device |
@@ -524,6 +525,7 @@ Snapshot commands intentionally follow the rolling `latest` tags. Published-rele
 
 - Added an opt-in MCP Streamable HTTP endpoint to both Docker variants without loading another model. Its single `transcribe_audio_file(file_location=...)` tool accepts either a confined local path or a bounded HTTP(S) file URL, while structured health and control tools expose inference/GPU state, forced-aligner lifecycle, and persistent realtime defaults. It reuses the REST API's inference and alignment boundary, enforces the same 100 MB limit, retains DNS-rebinding protection, and creates the input directory for existing persistent volumes.
 - Added a repeatable local-chat-model MCP tool-use benchmark covering health discovery, path/URL transcription, argument accuracy, timestamps, runtime controls, security errors, and retry recovery with Qwen 3.6 35B-A3B Q4_K_M.
+- Disabled the optional FlashInfer top-k/top-p sampler by default in favor of vLLM's native sampler. Qwen3-ASR uses deterministic decoding, while FlashInfer's startup JIT could terminate otherwise healthy GPU deployments when NAS or container runtimes exposed `libcuda.so.1` without the unversioned `libcuda.so` linker name. Advanced users can still opt in with `VLLM_USE_FLASHINFER_SAMPLER=1`.
 
 The current development snapshot is published through the rolling tags from `main`:
 
