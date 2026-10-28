@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: Apache-2.0. Gallery within the project website. */
+.gallery-content.asr-gallery{min-height:0;min-width:0;line-height:1.5;background:none}
+.gallery-content>.page-content{width:auto;max-width:none;margin:0;padding:24px 28px 32px}
+.gallery-content .brand-lockup,.gallery-content [data-project-overview],.gallery-content .top-links>a[href="https://github.com/Hangry-Labs/Qwen3-ASR-STT"]{display:none}
+.gallery-content .topbar{justify-content:flex-start;background:none;border:0;backdrop-filter:none;box-shadow:none;padding:0;margin-bottom:22px}
+.gallery-content .top-actions{justify-content:flex-start}
+.gallery-content .hero{gap:20px;grid-template-columns:minmax(0,1fr) minmax(220px,.55fr)}
+.gallery-content .hero-logo-link{max-width:280px}
+.gallery-content .hero-site-link{display:none}
+.gallery-content .hero h1{font-size:clamp(2rem,4vw,3.5rem);line-height:1.1}
+.gallery-content[dir="rtl"] .hero-copy,.gallery-content[dir="rtl"] .reference{text-align:start}
+@media(max-width:980px){.gallery-content .hero{grid-template-columns:minmax(0,1fr)}.gallery-content .hero-logo-panel{display:none}}
+@media(max-width:620px){.gallery-content>.page-content{padding:20px 16px}}

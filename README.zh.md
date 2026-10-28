@@ -13,6 +13,8 @@
   <a href="README.es.md">Español</a>
 </p>
 
+<p align="center"><a href="https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=zh"><strong>🎧 收听转录示例</strong></a></p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 面向 Docker 的 Qwen3-ASR 封装，提供本地浏览器界面和兼容 OpenAI 的转录 API。

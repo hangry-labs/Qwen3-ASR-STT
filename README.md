@@ -13,6 +13,8 @@
   <a href="README.es.md">Español</a>
 </p>
 
+<p align="center"><a href="https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=en"><strong>🎧 Listen to transcription examples</strong></a></p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 Docker-first speech-to-text packaging for Qwen3-ASR with a local browser UI and OpenAI-compatible transcription API.
@@ -72,7 +74,7 @@ No network access is required after pulling the full image. A fresh named volume
 
 ## Tiny Image
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show tiny image deployment guidance</strong></summary>
 
@@ -86,7 +88,7 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 ## Image Tags
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show available image tags and registries</strong></summary>
 
@@ -126,7 +128,7 @@ Remote file upload and API calls work over normal LAN HTTP when the port is expo
 
 ## OpenAI-Compatible API
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show API contract, examples, and client usage</strong></summary>
 
@@ -196,7 +198,7 @@ The `api_key="local"` value satisfies the client constructor; this local server 
 
 ## MCP
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show MCP documentation and endpoint reference</strong></summary>
 
@@ -281,7 +283,7 @@ Protocol endpoint:
 
 ## Models
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show model and forced-aligner details</strong></summary>
 
@@ -303,7 +305,7 @@ Optional forced aligner asset:
 Qwen/Qwen3-ForcedAligner-0.6B-hf
 ```
 
-The forced aligner is not loaded by default. Its first compiled load increased observed VRAM use by approximately 3.3 GiB on an RTX 5070 Ti; releasing it immediately returned about 1.8 GiB, while CUDA/compiler context remained cached until restart. Exact behavior varies by GPU, driver, and runtime settings. Selecting Word or Segment in the browserÃ¢â‚¬â€or requesting `timestamp_granularities` through the APIÃ¢â‚¬â€loads it on demand. The browser forces `verbose_json` while timestamps are selected and schedules the aligner for release after both options remain unchecked for 60 seconds. The System tab can release it immediately or keep it loaded persistently. To make startup loading the initial default when no saved preference exists, use:
+The forced aligner is not loaded by default. Its first compiled load increased observed VRAM use by approximately 3.3 GiB on an RTX 5070 Ti; releasing it immediately returned about 1.8 GiB, while CUDA/compiler context remained cached until restart. Exact behavior varies by GPU, driver, and runtime settings. Selecting Word or Segment in the browser or requesting `timestamp_granularities` through the API loads it on demand. The browser forces `verbose_json` while timestamps are selected and schedules the aligner for release after both options remain unchecked for 60 seconds. The System tab can release it immediately or keep it loaded persistently. To make startup loading the initial default when no saved preference exists, use:
 
 ```bash
 -e QWEN_ASR_ENABLE_ALIGNER=1
@@ -315,7 +317,7 @@ The single Qwen aligner supports Chinese, English, Cantonese, French, German, It
 
 ## Runtime Settings
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show runtime settings, persistence, and operations</strong></summary>
 
@@ -415,7 +417,11 @@ docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all
 
 ## Local Development
 
-<details>
+Preview the README-based website and listening gallery with `task pages`, build
+with `task pages-build`, or check staging and language routing with `task pages-test`.
+See the [website guide](site/README.md) for prerequisites and configuration.
+
+<details markdown="1">
 
 <summary><strong>Show local development and release workflows</strong></summary>
 
@@ -492,7 +498,7 @@ task imagestop
 
 ## Benchmarks
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show benchmark documentation and commands</strong></summary>
 
@@ -523,6 +529,9 @@ Snapshot commands intentionally follow the rolling `latest` tags. Published-rele
 
 ### v1.1 Snapshot
 
+- Add a multilingual README-based project website with shared navigation,
+  an integrated 30-language listening gallery, and scoped RTL support.
+
 - Added an opt-in MCP Streamable HTTP endpoint to both Docker variants without loading another model. Its single `transcribe_audio_file(file_location=...)` tool accepts either a confined local path or a bounded HTTP(S) file URL, while structured health and control tools expose inference/GPU state, forced-aligner lifecycle, and persistent realtime defaults. It reuses the REST API's inference and alignment boundary, enforces the same 100 MB limit, retains DNS-rebinding protection, and creates the input directory for existing persistent volumes.
 - Added a repeatable local-chat-model MCP tool-use benchmark covering health discovery, path/URL transcription, argument accuracy, timestamps, runtime controls, security errors, and retry recovery with Qwen 3.6 35B-A3B Q4_K_M.
 - Disabled the optional FlashInfer top-k/top-p sampler by default in favor of vLLM's native sampler. Qwen3-ASR uses deterministic decoding, while FlashInfer's startup JIT could terminate otherwise healthy GPU deployments when NAS or container runtimes exposed `libcuda.so.1` without the unversioned `libcuda.so` linker name. Advanced users can still opt in with `VLLM_USE_FLASHINFER_SAMPLER=1`.
@@ -543,14 +552,14 @@ docker run --name qwen3-asr-stt-tiny --restart unless-stopped -p 8000:8000 --gpu
 
 ### v1.0
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show v1.0 release notes and deployment commands</strong></summary>
 
 - Hardened the public API contract for OpenAI-client integrations while retaining its convenient permissive behavior: documented multipart and realtime schemas in `/docs`, made the single loaded model optional to specify, added model registration timestamps, completed unaligned `verbose_json` metadata, made SRT/VTT use real forced alignment, enforced timestamp-format rules, added tested AAC support and a configurable 100 MB upload limit, normalized unexpected failures, grouped custom and compatible routes, and added a live OpenAI Python client contract regression.
 - Added persistent and on-demand forced-aligner lifecycle management. Word or Segment selection can load the aligner without restarting, while the System tab can release its VRAM or keep it loaded across container replacements through the unified product data volume. Segment output is now divided into punctuation-, silence-, and duration-aware cues instead of one whole-file block.
 - Added Japanese word/segment alignment support to the image, capability-aware timestamp language validation, automatic idle aligner release, forced `verbose_json` timestamp output, actionable language-tokenizer errors, persistent realtime defaults, and one unified data volume for model assets, compiler caches, and application settings across releases.
-- Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Refreshed the WebP Hangry Labs artwork across the UI, examples, and 404 page; added a localized, linked Ã¢â‚¬Å“Powered by Hangry LabsÃ¢â‚¬Â signature; and placed the Hangry Labs logo immediately left of the Qwen mascot in the compact header. Reduced the vendored Lucide font to the glyphs used by the workspace.
+- Added a viewport-bounded Qwen3-ASR-STT brand hero that collapses into a responsive persistent header, restores its state before first paint, keeps the full loaded model available as hover detail, and links the displayed UI version to GitHub Releases. Refreshed the WebP Hangry Labs artwork across the UI, examples, and 404 page; added a localized, linked "Powered by Hangry Labs" signature; and placed the Hangry Labs logo immediately left of the Qwen mascot in the compact header. Reduced the vendored Lucide font to the glyphs used by the workspace.
 - Refined microphone workflows with automatic example loading, single-button record/stop controls for both recorded and realtime audio, responsive recording waveforms, aligned device refresh controls, and clearer recording status placement.
 - Expanded the System-tab GPU monitor with one-second tracking charts for compute load, memory activity, VRAM, temperature, power, fan speed, and graphics/memory clocks. Added timestamped hover values, one- and ten-minute windows, on-demand server sampling, and browser-session history restoration. The System layout now keeps operational controls in the narrower left column while the wider GPU monitor remains at the top right.
 - Extended transcription benchmarks with detected GPU identity, end-to-end request latency, audio duration, real-time factor, and realtime throughput. The refreshed 0.6B run processed 1,320.936 seconds of audio in 32.376 seconds on an RTX 5070 Ti, or 40.80 times realtime, while scoring 96.10% plus a 0.41% bonus.
@@ -558,7 +567,7 @@ docker run --name qwen3-asr-stt-tiny --restart unless-stopped -p 8000:8000 --gpu
 - Polished forced-alignment workflows with timestamp choice restoration during ordinary page refreshes, automatic removal of incompatible examples, live load-completion feedback, tokenizer preloading, and dynamic-shape compilation to avoid first-use recompilation when audio or alignment language changes.
 - Replaced quadratic forced-aligner timestamp repair with a stable O(N log N) implementation based on upstream PR [QwenLM/Qwen3-ASR#215](https://github.com/QwenLM/Qwen3-ASR/pull/215), preserving existing anchors and interpolation results.
 - Reproduced zero-duration lexical timestamps from [QwenLM/Qwen3-ASR#197](https://github.com/QwenLM/Qwen3-ASR/issues/197) and added a model-score-aware constrained decoder fallback that preserves ordinary alignment output while resolving affected words into positive, monotonic spans.
-- Profiled the cumulative realtime path from [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199), reproduced 4.8Ãƒâ€” latency growth and a 74-second model-context failure, and replaced unbounded accumulation with a configurable stable rolling audio/transcript window. A 120-second regression now completes with a 30-second inference cap and stable post-window update latency.
+- Profiled the cumulative realtime path from [QwenLM/Qwen3-ASR#199](https://github.com/QwenLM/Qwen3-ASR/issues/199), reproduced 4.8x latency growth and a 74-second model-context failure, and replaced unbounded accumulation with a configurable stable rolling audio/transcript window. A 120-second regression now completes with a 30-second inference cap and stable post-window update latency.
 - Added a deterministic 44-case audio robustness benchmark for [QwenLM/Qwen3-ASR#165](https://github.com/QwenLM/Qwen3-ASR/issues/165), covering silence, synthetic noise, hum, echo, and weak speech in automatic and forced-language modes. The 0.6B baseline produced no false positives for 10 automatic-language non-speech cases but hallucinated text for 18 of 20 forced-language cases; clean speech remained accurate at 1% amplitude. The runtime intentionally preserves model-native silence handling instead of adding VAD or energy gating that could alter streaming, alignment, quiet-speech, or training-data workflows.
 - Reproduced the prompt/context leakage reported in [QwenLM/Qwen3-ASR#186](https://github.com/QwenLM/Qwen3-ASR/issues/186): forced-language decoding can copy context when audio is silent or weak, while real speech can anchor the same context as a useful vocabulary hint. This upstream model behavior remains unchanged rather than adding lossy prompt filtering or a separate hotword model.
 - Added GitHub Container Registry as an official image mirror. One workflow publishes identical full and tiny rolling and immutable tags to Docker Hub and GHCR.
@@ -586,7 +595,7 @@ docker run --name qwen3-asr-stt-v1-0-tiny --restart unless-stopped -p 8000:8000 
 
 ### v0.2.0
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show v0.2.0 release notes and deployment commands</strong></summary>
 
@@ -622,7 +631,7 @@ docker run --name qwen3-asr-stt-v0-2-0-tiny --restart unless-stopped -p 8000:800
 
 ### v0.1.0
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show v0.1.0 release notes and deployment commands</strong></summary>
 

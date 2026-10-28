@@ -13,6 +13,8 @@
   <strong>Español</strong>
 </p>
 
+<p align="center"><a href="https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=es"><strong>🎧 Escuchar ejemplos de transcripción</strong></a></p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 Distribución de Qwen3-ASR orientada a Docker, con una interfaz web local y una API de transcripción compatible con OpenAI.

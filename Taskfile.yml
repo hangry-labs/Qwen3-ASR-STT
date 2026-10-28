@@ -300,3 +300,22 @@ tasks:
         ignore_error: true
       - cmd: cmd /c docker volume rm -f {{.DATA_VOLUME}} >nul 2>&1
         ignore_error: true
+
+  pages-build:
+    desc: Build the README website and integrated transcription examples
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - pwsh -NoProfile -File scripts/pages.ps1 build
+
+  pages:
+    desc: Preview the project website at http://127.0.0.1:9007/Qwen3-ASR-STT/
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - pwsh -NoProfile -File scripts/pages.ps1 preview
+
+  pages-test:
+    desc: Check public Pages staging and language routing without a GPU
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - uv run --no-project --python 3.13 python -m unittest discover -s tests -p test_pages.py
+      - node --test site/tests/*.test.mjs

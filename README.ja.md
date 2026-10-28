@@ -13,6 +13,8 @@
   <a href="README.es.md">Español</a>
 </p>
 
+<p align="center"><a href="https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=ja"><strong>🎧 文字起こしの音声サンプルを聴く</strong></a></p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 ローカルのブラウザー UI と OpenAI 互換の文字起こし API を備えた、Docker ファーストの Qwen3-ASR パッケージです。

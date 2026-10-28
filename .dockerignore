@@ -30,3 +30,6 @@ pretrained_models/
 # Large/reference-only assets
 assets/*.pdf
 testbench/results/
+
+# Website builder is separate from the inference image
+site/

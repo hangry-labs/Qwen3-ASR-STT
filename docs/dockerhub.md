@@ -1,119 +1,127 @@
-<p>
-  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/assets/qwen3_asr_logo_horizontal.webp" alt="Hangry Labs Qwen3-ASR-STT logo">
+<p align="center">
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/">
+    <img src="https://raw.githubusercontent.com/hangry-labs/Qwen3-ASR-STT/main/assets/qwen3_asr_logo_horizontal.webp" alt="Hangry Labs Qwen3-ASR-STT logo" width="900">
+  </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.md">English</a> ·
-  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.nb.md">Norsk bokmål</a> ·
-  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.pl.md">Polski</a> ·
-  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.ja.md">日本語</a> ·
-  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.zh.md">简体中文</a> ·
-  <a href="https://github.com/Hangry-Labs/Qwen3-ASR-STT/blob/main/README.es.md">Español</a>
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/?lang=en">English</a> ·
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/README.nb.html?lang=nb">Norsk bokmål</a> ·
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/README.pl.html?lang=pl">Polski</a> ·
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/README.ja.html?lang=ja">日本語</a> ·
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/README.zh.html?lang=zh">简体中文</a> ·
+  <a href="https://hangry-labs.github.io/Qwen3-ASR-STT/README.es.html?lang=es">Español</a>
 </p>
+
+<p align="center"><a href="https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=en"><strong>🎧 Listen to transcription examples</strong></a></p>
 
 # Hangry Labs Qwen3-ASR-STT
 
-Easy-to-run local speech-to-text Docker images for Qwen3-ASR, with a browser UI and OpenAI-compatible transcription API included.
-
-This Hangry Labs image is built for private local inference. Run the container, open the UI, upload or record audio, or point an OpenAI-compatible client at the local transcription endpoint.
-
-Official images are mirrored between [Docker Hub](https://hub.docker.com/r/hangrylabs/qwen3-asr-stt/tags) and [GitHub Container Registry](https://github.com/Hangry-Labs/Qwen3-ASR-STT/pkgs/container/qwen3-asr-stt). Replace `hangrylabs/qwen3-asr-stt` in any command with `ghcr.io/hangry-labs/qwen3-asr-stt` to use GHCR.
-
-## What You Get
-
-- Browser UI for file upload, recording, realtime microphone transcription, API status, and GPU visibility
-- OpenAI-compatible `POST /v1/audio/transcriptions`
-- Local realtime transcription session endpoints used by the UI
-- Qwen3-ASR 0.6B default model
-- Optional Qwen3-ASR 1.7B runtime configuration
-- Optional forced aligner support for timestamp output
-- Python 3.13 runtime with locked dependencies
-- Built-in vLLM 0.26 backend with CUDA graph acceleration
-- Transformers 5 diagnostic fallback and native forced aligner
-- Offline-friendly full image after pull
-- Tiny image variant for persistent model-cache workflows
-- Full image includes both `-hf` ASR checkpoints and the forced aligner
-
-## Browser UI
-
-Open the primary browser UI at:
-
-```text
-http://localhost:8000
-```
-
-<p>
-  <img src="https://github.com/Hangry-Labs/Qwen3-ASR-STT/raw/main/assets/ui.webp" alt="Qwen3-ASR-STT browser UI">
-</p>
-
-The responsive UI provides file upload and browser recording, a replaceable waveform editor with playback and trimming controls, bundled multilingual examples, bounded-window realtime microphone transcription, API status, and GPU monitoring. Model readiness and the UI build version are visible in a collapsible persistent header. Selecting Word or Segment timestamps loads the optional forced aligner on demand; the System tab can release it or persist an always-loaded preference.
-
-Remote file upload and API calls work over normal LAN HTTP when the port is exposed. Browser microphone recording requires a secure browser origin, so use `localhost` or serve the UI over HTTPS when opening it from another machine.
+Local Qwen3-ASR speech to text with a browser Studio, OpenAI-compatible
+transcription API, live microphone transcription and optional MCP tools in one
+NVIDIA GPU Docker container. Audio stays on infrastructure you control.
 
 ## Quick Start
 
-Run with NVIDIA GPU support:
+Run the full image:
 
 ```bash
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest
 ```
 
-Commands in this document are intentionally kept on one line so they can be copied into Bash, PowerShell, or Windows Command Prompt without shell-specific line-continuation syntax. Docker creates the named `qwen3_asr_stt_data` volume automatically when it does not already exist.
+Open **[http://localhost:8000](http://localhost:8000)**. The browser Studio and
+HTTP APIs share the same port; interactive API documentation is at
+[http://localhost:8000/docs](http://localhost:8000/docs).
 
-Then open the UI:
+All shell commands are one physical line for Bash, PowerShell and Windows
+Command Prompt. Docker creates the named data volume automatically. For access
+only from this machine, replace the port mapping with `-p 127.0.0.1:8000:8000`.
 
-```text
-http://localhost:8000
-```
+The full image bakes both Qwen3-ASR 0.6B and 1.7B checkpoints plus the optional
+forced aligner. Default inference uses 0.6B, bf16 weights and the built-in vLLM
+backend. After pulling, it can start and transcribe without a model download.
+The volume preserves models, compiler caches and settings across replacements;
+loaded GPU state is recreated at startup.
 
-Health check:
+### Tiny image
 
-```bash
-curl http://localhost:8000/health
-```
-
-API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-## Tiny Image
-
-<details>
-
-<summary><strong>Show tiny image deployment guidance</strong></summary>
-
-Use `latest_tiny` when you want runtime dependencies but prefer model assets to live in a persistent cache volume:
+Use the same Studio and APIs with model assets downloaded on first online use:
 
 ```bash
 docker run --name qwen3-asr-stt --restart unless-stopped -p 8000:8000 --gpus all -e CUDA_VISIBLE_DEVICES=0 -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -v qwen3_asr_stt_data:/app/persistent hangrylabs/qwen3-asr-stt:latest_tiny
 ```
 
-The tiny image downloads model assets on first online use, then reuses the mounted data volume across later image tags.
+Keep the data volume for later runs. The online flags allow missing assets to be
+downloaded; after the required assets are cached, offline flags can be restored.
+The full and tiny commands are alternative deployments using the same container
+name and port.
 
-</details>
+## What You Get
+
+<p align="center"><img src="https://raw.githubusercontent.com/hangry-labs/Qwen3-ASR-STT/main/assets/ui.webp" alt="Qwen3-ASR-STT Studio with transcription, waveform editing and audio controls"></p>
+
+- **Transcribe:** upload or record audio, edit its waveform, trim, seek, adjust
+  playback volume/speed, download audio and inspect transcript responses.
+- **Stream:** live microphone transcription over a bounded rolling audio window,
+  with configurable update intervals and transcript-stability controls.
+- **API:** OpenAI-compatible file transcription, model/language discovery and
+  interactive request documentation.
+- **System:** inference readiness, model/build identity, GPU telemetry, saved
+  realtime defaults and forced-aligner load/release/residency controls.
+- **Timestamps and subtitles:** optional word/segment alignment and SRT/VTT
+  output for supported alignment languages. The aligner loads on demand.
+- **Languages:** transcription across 30 languages with model-native language
+  identification. Studio languages are English, Polish, Japanese, Chinese,
+  Spanish and German; the public website has six README translations.
+- **MCP:** opt-in tools for health, transcription from shared paths or file URLs,
+  aligner control and realtime settings, sharing the same loaded ASR model.
+
+The [listening gallery](https://hangry-labs.github.io/Qwen3-ASR-STT/examples/)
+pairs 30 existing test recordings with their reference transcripts. It supports
+language filtering, playback, seeking, volume and Arabic/Persian right-to-left
+content. These are recorded input examples, not live transcription results.
+
+Browser microphone access requires `localhost` or HTTPS. LAN HTTP supports file
+uploads and API calls; use a trusted certificate for remote microphone use.
+
+## Runtime Settings
+
+| Setting | Purpose |
+| --- | --- |
+| Port `8000` | Studio, REST APIs, health and optional MCP in one process. |
+| `/app/persistent` | Models, vLLM/TorchInductor compiler caches, saved operator settings and the MCP input directory. |
+| `QWEN_ASR_MODEL` | Select the 0.6B default or the baked 1.7B checkpoint. |
+| `QWEN_ASR_BACKEND=vllm` | Accelerated production inference; Transformers remains an explicit diagnostic fallback. |
+| System → forced aligner | Load, release or save an always-loaded preference for timestamp alignment. |
+| `QWEN_ASR_MAX_UPLOAD_MB=100` | Default upload size limit. |
+| System → realtime defaults | Save chunk interval, rolling-window duration and transcript-stability settings. |
+| System → MCP connectivity | Enable `/mcp` on a trusted deployment; disabled by default. |
+| `VLLM_USE_FLASHINFER_SAMPLER=0` | Default native deterministic sampler, avoiding optional sampler JIT startup failures. |
+
+The local API does not authenticate the SDK's placeholder key. Use a trusted
+network or an authenticating reverse proxy. MCP's enable switch and
+DNS-rebinding guard are deployment safeguards, not user authentication.
 
 ## Image Tags
 
-<details>
+| Tag | Contents |
+| --- | --- |
+| `latest` | Moving full image with baked ASR and aligner assets. |
+| `latest_tiny` | Moving runtime with assets downloaded into the data volume. |
+| `v1.0` | Published full release; immutable deployment references are in the release history. |
+| `v1.0_tiny` | Matching published tiny release. |
 
-<summary><strong>Show available image tags and registries</strong></summary>
-
-- Docker Hub: `hangrylabs/qwen3-asr-stt`
-- GitHub Container Registry: `ghcr.io/hangry-labs/qwen3-asr-stt`
-- `latest` - full baked image
-- `latest_tiny` - tiny image with persistent-cache workflow
-- `vX.Y` or `vX.Y.Z` - full release image, for example `v1.0`
-- `vX.Y_tiny` or `vX.Y.Z_tiny` - tiny release image, for example `v1.0_tiny`
-
-Snapshot tags are not published.
-
-</details>
+Both image variants are mirrored to
+[GHCR](https://github.com/hangry-labs/Qwen3-ASR-STT/pkgs/container/qwen3-asr-stt).
+Replace `hangrylabs/qwen3-asr-stt` with `ghcr.io/hangry-labs/qwen3-asr-stt` in any
+command to use that registry. Moving tags stay unpinned; see the
+[release history](https://hangry-labs.github.io/Qwen3-ASR-STT/#version-history)
+for readable release tags pinned to their published top-level image digests.
+Snapshot version tags are not published separately.
 
 ## API examples and OpenAI-compatible usage
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show API examples and guidance</strong></summary>
 
@@ -166,7 +174,7 @@ The local server does not authenticate the placeholder `api_key="local"`. Keep i
 
 ## MCP integration and endpoint reference
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show MCP documentation and endpoints</strong></summary>
 
@@ -213,7 +221,7 @@ Useful routes:
 
 ## Advanced runtime configuration and operations
 
-<details>
+<details markdown="1">
 
 <summary><strong>Show runtime settings and operational guidance</strong></summary>
 
@@ -282,7 +290,7 @@ Common knobs:
 - `QWEN_ASR_SSL_CERTFILE=/certs/fullchain.pem`
 - `QWEN_ASR_SSL_KEYFILE=/certs/privkey.pem`
 
-The System tab persists `mcp_enabled`, `load_aligner_always`, and the realtime `chunk_size_sec`, `max_window_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. `max_window_sec` accepts 10â€“60 seconds and defaults to 30. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
+The System tab persists `mcp_enabled`, `load_aligner_always`, and the realtime `chunk_size_sec`, `max_window_sec`, `unfixed_chunk_num`, and `unfixed_token_num` defaults in `/app/persistent/app/settings.json`. The file can also be edited while the container is stopped. `max_window_sec` accepts 10–60 seconds and defaults to 30. Restart-bound model, backend, GPU, compiler, and health-policy controls remain environment variables.
 
 Startup warmup intentionally makes `/health` wait until vLLM compilation, CUDA graph capture, and three representative decode passes have stabilized the normal generation path. The first API transcription after readiness therefore does not pay lazy initialization cost.
 
@@ -314,7 +322,19 @@ Speech can contain private, identifying, or sensitive information. This image is
 
 Only transcribe audio you are allowed to process. Do not use this image for covert recording, surveillance, harassment, fraud, or other illegal or unethical activity.
 
+## Benchmarks
+
+The repository publishes [multilingual transcription measurements](https://hangry-labs.github.io/Qwen3-ASR-STT/benchmarks/transcription/BENCHMARKS.html),
+[audio robustness results](https://hangry-labs.github.io/Qwen3-ASR-STT/benchmarks/robustness/BENCHMARKS.html)
+and [VRAM profiles](https://hangry-labs.github.io/Qwen3-ASR-STT/benchmarks/vram/model_vram.html).
+Reports record their model, hardware, corpus and settings; do not compare runs
+with different profiles as equivalent measurements.
+
 ## Project Links
+
+- [Project website and documentation](https://hangry-labs.github.io/Qwen3-ASR-STT/)
+- [Listening gallery](https://hangry-labs.github.io/Qwen3-ASR-STT/examples/)
+- [Examples and fixture guide](https://hangry-labs.github.io/Qwen3-ASR-STT/examples/guide/)
 
 - GitHub repository: https://github.com/Hangry-Labs/Qwen3-ASR-STT
 - Upstream Qwen3-ASR repository: https://github.com/QwenLM/Qwen3-ASR
@@ -327,4 +347,4 @@ This is an independently maintained Hangry Labs packaging and serving fork of th
 
 The upstream Qwen team provides the model architecture, weights, and research. Hangry Labs maintains this Docker-first runtime packaging, local UI/API integration, benchmarking, documentation, and release workflow.
 
-License and attribution are preserved in the repository.
+License and attribution are preserved in the repository [LICENSE](https://github.com/hangry-labs/Qwen3-ASR-STT/blob/main/LICENSE) and [third-party notices](https://hangry-labs.github.io/Qwen3-ASR-STT/THIRD_PARTY_NOTICES.html).

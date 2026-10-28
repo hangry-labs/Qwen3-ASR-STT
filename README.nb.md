@@ -13,6 +13,8 @@
   <a href="README.es.md">Español</a>
 </p>
 
+<p align="center"><a href="https://hangry-labs.github.io/Qwen3-ASR-STT/examples/?lang=nb"><strong>🎧 Lytt til transkripsjonseksempler</strong></a></p>
+
 # Hangry Labs Qwen3-ASR-STT
 
 Docker-først-pakking av Qwen3-ASR med et lokalt nettlesergrensesnitt og et OpenAI-kompatibelt API for transkripsjon.
