@@ -529,6 +529,8 @@ Snapshot commands intentionally follow the rolling `latest` tags. Published-rele
 
 ### v1.1 Snapshot
 
+- Updated the inference dependency stack to vLLM 0.32, PyTorch 2.13/CUDA 13.0, and Transformers 5.19, with patched Pillow, aiohttp, certifi, dnspython, filelock, and OpenTelemetry dependencies. Removed the unused remote-theme ZIP loader from the local website builder. See the [dependency security review](docs/dependency-security.md) for remaining upstream constraints.
+
 - Add a multilingual README-based project website with shared navigation,
   an integrated 30-language listening gallery, and scoped RTL support.
 
