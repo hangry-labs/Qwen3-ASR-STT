@@ -29,3 +29,5 @@ testbench/results/*.json
 # Local agent workspace and repository instructions
 /.ai/
 /AGENTS.md
+/UPSTREAM_PULL_REQUESTS.md
+/UPSTREAM_ISSUES.md

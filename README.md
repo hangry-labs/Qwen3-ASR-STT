@@ -147,7 +147,9 @@ Supported request fields:
 | `temperature` | Optional, but only `0` is accepted. Both inference backends intentionally use deterministic greedy decoding for stable STT output. |
 | `stream` | Optional. Returns OpenAI-compatible SSE event shapes after completed-file inference; see the realtime distinction below. |
 
-`verbose_json` always includes the detected language, normalized audio duration, and segments. Without requested alignment, it reports one coarse segment covering the completed audio. With `word` or `segment` timestamps, it returns exact forced-aligner timing. `srt` and `vtt` automatically request real segment alignment and therefore follow the same aligner language availability rules; they never manufacture placeholder subtitle timings.
+`verbose_json` always includes the detected language, normalized audio duration, and segments. Without requested alignment, it reports one coarse segment covering the completed audio. With `word` or `segment` timestamps, it returns model-estimated forced-alignment timing. `srt` and `vtt` automatically request real segment alignment and therefore follow the same aligner language availability rules; they never manufacture placeholder subtitle timings.
+
+For recordings that switch languages, recognition can omit or change words and cause large timestamp errors. See [mixed-language transcription and timestamp limits](docs/mixed-language-transcription.md) for the confirmed Chinese/Korean case and a tested context workaround.
 
 ### cURL
 
@@ -161,7 +163,7 @@ Force a language when you know it:
 curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "language=English" -F "response_format=verbose_json"
 ```
 
-Request exact word and segment timestamps:
+Request word and segment timestamps:
 
 ```bash
 curl -X POST "http://localhost:8000/v1/audio/transcriptions" -F "file=@sample.mp3" -F "model=qwen3-asr" -F "response_format=verbose_json" -F "timestamp_granularities[]=word" -F "timestamp_granularities[]=segment"
@@ -528,6 +530,8 @@ The benchmark scores focus on transcription meaning. Punctuation, quote recovery
 Snapshot commands intentionally follow the rolling `latest` tags. Published-release commands retain their readable version tag and also pin Docker Hub's immutable top-level OCI index digest; the digest is authoritative if a tag is ever changed.
 
 ### v1.1 Snapshot
+
+- Documented the confirmed Chinese/Korean recognition and timestamp limitation from [QwenLM/Qwen3-ASR#221](https://github.com/QwenLM/Qwen3-ASR/issues/221), including a bounded context workaround. This remains an open model-quality issue; inference defaults are unchanged.
 
 - Updated the inference dependency stack to vLLM 0.32, PyTorch 2.13/CUDA 13.0, and Transformers 5.19, with patched Pillow, aiohttp, certifi, dnspython, filelock, and OpenTelemetry dependencies. Removed the unused remote-theme ZIP loader from the local website builder. See the [dependency security review](docs/dependency-security.md) for remaining upstream constraints.
 

@@ -5,6 +5,8 @@
 .idea
 .ai
 AGENTS.md
+UPSTREAM_PULL_REQUESTS.md
+UPSTREAM_ISSUES.md
 
 # Python cache/artifacts
 __pycache__/
